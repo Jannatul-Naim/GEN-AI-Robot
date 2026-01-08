@@ -28,6 +28,10 @@ LOCK_LOST_TIMEOUT = 1.0
 
 TARGET_CLASSES = ["bottle", "cup", "cell phone"]
 
+
+
+
+
 OBJECT_WIDTHS_CM = {
     "bottle": 7.0,
     "cup": 8.0,
@@ -38,8 +42,8 @@ OBJECT_WIDTHS_CM = {
 
 vision_state = {
     "objects": [],
-    # "fps": 0,
-    # "timestamp": 0.0
+    "fps": 0,
+    "timestamp": 0.0
 }
 
 vision_lock = threading.Lock()
@@ -142,8 +146,8 @@ class VisionThread(threading.Thread):
 
             with vision_lock:
                 vision_state["objects"] = objects
-                # vision_state["fps"] = fps
-                # vision_state["timestamp"] = time.time()
+                vision_state["fps"] = fps
+                vision_state["timestamp"] = time.time()
 
             if SHOW_CAMERA:
                 if self.locked_target:
