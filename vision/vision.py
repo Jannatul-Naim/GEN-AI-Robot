@@ -174,7 +174,7 @@ def get_vision_json():
     with vision_lock:
         return json.dumps(vision_state, indent=2)
 
-if __name__ == "__main__":
+def test_vision():
     VisionThread().start()
     try:
         while not stop_event.is_set():

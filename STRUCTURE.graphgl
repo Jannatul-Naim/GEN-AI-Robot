@@ -13,7 +13,7 @@ gen_ai_robot/
 │   ├── vision_client.py            # HTTP client for /vision
 │   └── run_brain.py                # Main loop (user → brain)
 │
-├── serialization/                  # Actuation bridge (russparry)
+├── robit_serialization/                  # Actuation bridge (russparry)
 │   ├── __init__.py
 │   ├── robot_server.py             # /robot Flask API (your code)
 │   ├── serializer.py               # JSON → motion packets (future)
