@@ -254,7 +254,7 @@ def send_to_russparry(data):
 
 
 # ===================== TEST =====================
-if __name__ == "__main__":
+def test_brain():
     yolo_data = {
         "objects": [
             {
