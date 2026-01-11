@@ -9,6 +9,9 @@ OLLAMA_MODEL = "llama3:8b"
 MIN_CONFIDENCE = 0.6
 LLM_TIMEOUT = 20
 
+
+RUSSPARRY_URL = "http://russparry:9000/robot"
+
 # ===================== MEMORY =====================
 class Memory:
     def __init__(self):
@@ -241,6 +244,14 @@ class Brain:
             "reply": "Unhandled command.",
             "plan": []
         }
+#==================== Server Code ====================
+def send_to_russparry(data):
+    try:
+        requests.post(RUSSPARRY_URL, json=data, timeout=3)
+    except requests.exceptions.RequestException:
+        pass
+
+
 
 # ===================== TEST =====================
 if __name__ == "__main__":
@@ -277,5 +288,7 @@ if __name__ == "__main__":
 
     for cmd in tests:
         print("\nUSER:", cmd)
-        print(json.dumps(brain.process(cmd, yolo_data), indent=2))
+        result = brain.process(cmd, yolo_data)
+        print(json.dumps(result, indent=2))
+        send_to_russparry(result)
         time.sleep(1)
