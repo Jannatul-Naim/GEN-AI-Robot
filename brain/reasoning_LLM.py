@@ -9,8 +9,8 @@ OLLAMA_MODEL = "llama3:8b"
 MIN_CONFIDENCE = 0.6
 LLM_TIMEOUT = 20
 
+RUSSPARRY_URL = "http://192.168.0.109:9000/robot"
 
-RUSSPARRY_URL = "http://russparry:9000/robot"
 
 # ===================== MEMORY =====================
 class Memory:
@@ -291,4 +291,5 @@ if __name__ == "__main__":
         result = brain.process(cmd, yolo_data)
         print(json.dumps(result, indent=2))
         send_to_russparry(result)
+        print("Sent to Russparry: ", result)
         time.sleep(1)
