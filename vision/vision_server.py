@@ -7,4 +7,3 @@ app = Flask(__name__)
 def vision():
     with vision_lock:
         return jsonify(vision_state)
-
