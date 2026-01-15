@@ -21,7 +21,7 @@ def move_all(angles):
 move_joint(0, 120)
 time.sleep(0.5)
 
-# move_all([90, 70, 90, 120, 90, 90])
+move_all([90, 70, 90, 120, 90, 90])
 
 time.sleep(0.2)
 while ser.in_waiting:
@@ -32,3 +32,6 @@ while True:
     angle = int(input("Angle (0-180): "))
     if 0 <= joint <= 5 and 0 <= angle <= 180:
         move_joint(joint, angle)
+    one = int(input("One"))
+    two = int(input("Two"))
+    move_all([one, two, 90, 90, 90])
