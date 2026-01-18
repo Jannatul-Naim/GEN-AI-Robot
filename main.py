@@ -151,7 +151,7 @@ if __name__ == "__main__":
 
     arm = RoboticArm(k, t, limits)
 
-    q_start = np.radians([90, 90, 90, 90, 60])
+    q_start = np.radians([90, 90, 90, 90, 90])
     p_eff = [L5, 0, 0]
 
     print("\n=== Cartesian Control Mode ===")

@@ -1,4 +1,7 @@
+import cmd
 from flask import Flask, request
+
+import angles
 
 app = Flask(__name__)
 
@@ -8,5 +11,3 @@ def robot():
     print("RECEIVED:", data, flush=True)
     return "OK", 200
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=9000, debug=False)

@@ -4,24 +4,29 @@ import time
 PORT = "/dev/ttyUSB0"
 BAUD = 115200
 
-ser = serial.Serial(PORT, BAUD, timeout=0.1)
+ser = serial.Serial(PORT, BAUD, timeout=0.1,exclusive=True)
 time.sleep(2)
 
 def move_joint(joint, angle):
     cmd = f"J {joint} {angle}\n"
-    ser.write(cmd.encode())
+    ser.write(cmd.encode()) 
     print("Sent:", cmd.strip())
 
-def move_all(angles):
-    cmd = "A " + " ".join(map(str, angles)) + "\n"
-    ser.write(cmd.encode())
-    print("Sent:", cmd.strip())
+def set_default_position():
+    move_joint(5, 150)
+    move_joint(4, 60)
+    move_joint(3, 210)
+    move_joint(2, 220)
+    move_joint(1, 100)
+    move_joint(0, 120)
 
-# ========= TEST =========
-move_joint(0, 120)
-time.sleep(0.5)
 
-move_all([90, 70, 90, 120, 90, 90])
+
+
+set_default_position()
+
+
+
 
 time.sleep(0.2)
 while ser.in_waiting:
@@ -30,8 +35,6 @@ while ser.in_waiting:
 while True:
     joint = int(input("Joint (0-5): "))
     angle = int(input("Angle (0-180): "))
-    if 0 <= joint <= 5 and 0 <= angle <= 180:
+    if 0 <= joint <= 5 and 0 <= angle <= 240:
         move_joint(joint, angle)
-    one = int(input("One"))
-    two = int(input("Two"))
-    move_all([one, two, 90, 90, 90])
+    
