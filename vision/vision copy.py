@@ -5,15 +5,17 @@ import math
 import threading
 from ultralytics import YOLO
 
+# ===================== CAMERA CONFIG =====================
 CAMERA_INDEX = 0
 CAM_WIDTH = 640
 CAM_HEIGHT = 480
 CAM_FPS = 12
 
 CAMERA_HFOV_DEG = 78.0
-CAMERA_HEIGHT_CM = 40.0
-CAMERA_TILT_DEG = 45
+CAMERA_TILT_DEG = 45.0           # 🔥 FIXED 45 DEG
+CAMERA_HEIGHT_CM = 40.0          # 🔥 CAMERA HEIGHT FROM FLOOR
 
+# ===================== YOLO CONFIG =====================
 YOLO_MODEL = "yolov8n.pt"
 YOLO_IMGSZ = 320
 YOLO_CONF = 0.45
@@ -26,21 +28,15 @@ OBJECT_WIDTHS_CM = {
     "apple": 8.0
 }
 
+# ===================== SYSTEM =====================
 SHOW_CAMERA = True
 INFER_INTERVAL = 0.35
 
-GRASP_OFFSET_X = 0
-GRASP_OFFSET_Y = 20
-
-vision_state = {
-    "objects": [],
-    "fps": 0,
-    "timestamp": 0.0
-}
-
+vision_state = {"objects": [], "fps": 0, "timestamp": 0.0}
 vision_lock = threading.Lock()
 stop_event = threading.Event()
 
+# ===================== CAMERA INTRINSICS =====================
 def focal_length_px(w, hfov):
     return (w / 2) / math.tan(math.radians(hfov / 2))
 
@@ -49,23 +45,35 @@ FY = FX
 CX = CAM_WIDTH / 2
 CY = CAM_HEIGHT / 2
 
-def pixel_to_world_cm(cx, cy, bw, name):
+# ===================== GEOMETRY (45° TILT CORRECT) =====================
+def pixel_to_ground(cx, cy, bw, name):
     real_w = OBJECT_WIDTHS_CM.get(name, 10.0)
-    z = (real_w * FX) / max(bw, 2)
-    dx = cx - CX
-    dy = cy - CY
-    x = (dx * z) / FX
-    y = (dy * z) / FY
-    tilt = math.radians(CAMERA_TILT_DEG)
-    yw = math.cos(tilt) * y + math.sin(tilt) * z
-    zw = -math.sin(tilt) * y + math.cos(tilt) * z
-    yw = CAMERA_HEIGHT_CM - yw
+
+    # --- Horizontal bearing ---
+    theta = math.atan((cx - CX) / FX)
+
+    # --- Vertical ray angle ---
+    phi = math.atan((cy - CY) / FY)
+
+    # --- Total downward angle ---
+    total_angle = phi + math.radians(CAMERA_TILT_DEG)
+
+    # --- Ground intersection distance ---
+    if total_angle <= 0:
+        return None
+
+    Z = CAMERA_HEIGHT_CM / math.tan(total_angle)
+
+    # --- Lateral position ---
+    X = Z * math.tan(theta)
+
     return {
-        "x": round(x, 2),
-        "y": round(yw, 2),
-        "z": round(zw, 2)
+        "z_cm": round(Z, 2),                         # forward distance
+        "theta_deg": round(math.degrees(theta), 2), # bearing
+        "x_cm": round(X, 2)
     }
 
+# ===================== VISION THREAD =====================
 class VisionThread(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -101,26 +109,35 @@ class VisionThread(threading.Thread):
                     name = self.model.names[cls]
                     if name not in TARGET_CLASSES:
                         continue
+
                     conf = float(b.conf[0])
                     x1, y1, x2, y2 = map(int, b.xyxy[0])
                     cx = (x1 + x2) // 2
                     cy = (y1 + y2) // 2
                     bw = max(x2 - x1, 2)
-                    pos = pixel_to_world_cm(cx, cy, bw, name)
+
+                    pose = pixel_to_ground(cx, cy, bw, name)
+                    if pose is None:
+                        continue
+
                     objs.append({
                         "name": name,
                         "confidence": round(conf, 2),
-                        "position_cm": pos,
-                        "pixel_center": [cx, cy],
-                        "grasp_center": [cx + GRASP_OFFSET_X, cy + GRASP_OFFSET_Y]
+                        "pose": pose,
+                        "pixel": [cx, cy]
                     })
 
                     if SHOW_CAMERA:
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f"{name} {pos['z']}cm",
-                                    (x1, y1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.5, (0, 255, 0), 2)
+                        cv2.putText(
+                            frame,
+                            f"{name} Z:{pose['z_cm']}cm θ:{pose['theta_deg']}°",
+                            (x1, y1 - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 255, 0),
+                            2
+                        )
 
             fps = int(1 / max(time.time() - self.prev, 0.001))
             self.prev = time.time()
@@ -140,15 +157,13 @@ class VisionThread(threading.Thread):
         self.cap.release()
         cv2.destroyAllWindows()
 
-def get_vision_json():
-    with vision_lock:
-        return json.dumps(vision_state, indent=2)
-
+# ===================== MAIN =====================
 def main():
     VisionThread().start()
     try:
         while not stop_event.is_set():
-            print(get_vision_json())
+            with vision_lock:
+                print(json.dumps(vision_state, indent=2))
             time.sleep(0.5)
     except KeyboardInterrupt:
         stop_event.set()

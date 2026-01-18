@@ -104,7 +104,7 @@ OUTPUT FORMAT (STRICT):
 Return ONLY valid JSON.
 
 {{
-  "intent": "pick | place | stop | chat",
+  "intent": "pick | place | stop | chat | give",
   "target": null | string,
   "reply": string
 }}
@@ -244,6 +244,8 @@ class Brain:
             "reply": "Unhandled command.",
             "plan": []
         }
+        if decision["intent"] == "give":
+            pass
 #==================== Server Code ====================
 def send_to_russparry(data):
     try:
