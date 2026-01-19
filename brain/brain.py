@@ -258,22 +258,18 @@ def send_to_russparry(data):
 # ===================== TEST =====================
 def test_brain():
     yolo_data = {
-        "objects": [
-            {
-                "name": "bottle",
-                "confidence": 0.72,
-                "distance_cm": 29.4,
-                "center": [476, 524],
-                "grasp_center": [476, 544]
-            },
-            {
-                "name": "cup",
-                "confidence": 0.66,
-                "distance_cm": 24.9,
-                "center": [621, 590],
-                "grasp_center": [621, 610]
-            }
-        ]
+        "objects":  [
+    {
+    "name": "cup",
+    "z_cm": 11.99,
+    "degree": 27.99
+  },
+  {
+    "name": "bottle",
+    "z_cm": 17.67,
+    "degree": -6.64
+  }
+] 
     }
 
     brain = Brain()
@@ -295,3 +291,5 @@ def test_brain():
         send_to_russparry(result)
         print("Sent to Russparry: ", result)
         time.sleep(1)
+if __name__ == "__main__":
+    test_brain()

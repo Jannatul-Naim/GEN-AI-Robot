@@ -11,8 +11,8 @@ CAM_HEIGHT = 480
 CAM_FPS = 12
 
 CAMERA_HFOV_DEG = 78.0
-CAMERA_HEIGHT_CM = 40.0
-CAMERA_TILT_DEG = 45
+CAMERA_TILT_DEG = 15.0
+CAMERA_HEIGHT_CM = 15.0
 
 YOLO_MODEL = "yolov8n.pt"
 YOLO_IMGSZ = 320
@@ -20,24 +20,10 @@ YOLO_CONF = 0.45
 
 TARGET_CLASSES = ["bottle", "cup", "apple"]
 
-OBJECT_WIDTHS_CM = {
-    "bottle": 6.0,
-    "cup": 10.0,
-    "apple": 8.0
-}
-
 SHOW_CAMERA = True
 INFER_INTERVAL = 0.35
 
-GRASP_OFFSET_X = 0
-GRASP_OFFSET_Y = 20
-
-vision_state = {
-    "objects": [],
-    "fps": 0,
-    "timestamp": 0.0
-}
-
+vision_state = {"objects": []}
 vision_lock = threading.Lock()
 stop_event = threading.Event()
 
@@ -49,22 +35,14 @@ FY = FX
 CX = CAM_WIDTH / 2
 CY = CAM_HEIGHT / 2
 
-def pixel_to_world_cm(cx, cy, bw, name):
-    real_w = OBJECT_WIDTHS_CM.get(name, 10.0)
-    z = (real_w * FX) / max(bw, 2)
-    dx = cx - CX
-    dy = cy - CY
-    x = (dx * z) / FX
-    y = (dy * z) / FY
-    tilt = math.radians(CAMERA_TILT_DEG)
-    yw = math.cos(tilt) * y + math.sin(tilt) * z
-    zw = -math.sin(tilt) * y + math.cos(tilt) * z
-    yw = CAMERA_HEIGHT_CM - yw
-    return {
-        "x": round(x, 2),
-        "y": round(yw, 2),
-        "z": round(zw, 2)
-    }
+def pixel_to_ground(cx, cy):
+    theta = math.atan((cx - CX) / FX)
+    phi = math.atan((cy - CY) / FY)
+    total_angle = phi + math.radians(CAMERA_TILT_DEG)
+    if total_angle <= 0:
+        return None
+    z = CAMERA_HEIGHT_CM / math.tan(total_angle)
+    return round(z, 2), round(math.degrees(theta), 2)
 
 class VisionThread(threading.Thread):
     def __init__(self):
@@ -75,7 +53,6 @@ class VisionThread(threading.Thread):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
         self.cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
         self.last = time.time()
-        self.prev = time.time()
 
     def run(self):
         if SHOW_CAMERA:
@@ -101,44 +78,47 @@ class VisionThread(threading.Thread):
                     name = self.model.names[cls]
                     if name not in TARGET_CLASSES:
                         continue
-                    conf = float(b.conf[0])
+
                     x1, y1, x2, y2 = map(int, b.xyxy[0])
                     cx = (x1 + x2) // 2
                     cy = (y1 + y2) // 2
-                    bw = max(x2 - x1, 2)
-                    pos = pixel_to_world_cm(cx, cy, bw, name)
+
+                    res = pixel_to_ground(cx, cy)
+                    if res is None:
+                        continue
+
+                    z, deg = res
                     objs.append({
                         "name": name,
-                        "confidence": round(conf, 2),
-                        "position_cm": pos,
-                        "pixel_center": [cx, cy],
-                        "grasp_center": [cx + GRASP_OFFSET_X, cy + GRASP_OFFSET_Y]
+                        "z_cm": z,
+                        "degree": deg
                     })
 
                     if SHOW_CAMERA:
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f"{name} {pos['z']}cm",
-                                    (x1, y1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.5, (0, 255, 0), 2)
-
-            fps = int(1 / max(time.time() - self.prev, 0.001))
-            self.prev = time.time()
+                        cv2.putText(
+                            frame,
+                            f"{name} Z:{z}cm θ:{deg}°",
+                            (x1, y1 - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 255, 0),
+                            2
+                        )
 
             with vision_lock:
                 vision_state["objects"] = objs
-                vision_state["fps"] = fps
-                vision_state["timestamp"] = time.time()
 
             if SHOW_CAMERA:
-                cv2.putText(frame, f"FPS {fps}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
                 cv2.imshow("Vision", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     stop_event.set()
 
         self.cap.release()
         cv2.destroyAllWindows()
+
+
+
 
 def get_vision_json():
     with vision_lock:
@@ -148,7 +128,8 @@ def main():
     VisionThread().start()
     try:
         while not stop_event.is_set():
-            print(get_vision_json())
+            with vision_lock:
+                print(json.dumps(vision_state["objects"], indent=2))
             time.sleep(0.5)
     except KeyboardInterrupt:
         stop_event.set()
