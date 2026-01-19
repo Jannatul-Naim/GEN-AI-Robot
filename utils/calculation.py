@@ -4,21 +4,23 @@ from scipy.optimize import fsolve
 
 
 
-def solve_angles_deg(x,y,task):
+def solve_angles_deg(D,theta,task):
     initial_guess_deg=(30, -30)
-    D = math.hypot(x, y)# calculate horizontal distance
     d = D-20  # adjust for base offset
     x4_deg = 60
-    x0_deg = np.degrees(math.atan2(y, x))  # base rotation angle
+    x0_deg = theta  # base rotation angle
     # convert initial guess to radians
     initial_guess = np.radians(initial_guess_deg)
 
-    # Set x5 angle based on task
-    if task == 'grab':
-        x5_deg = 80
-    elif task == 'place':
-        x5_deg = 190
-        
+    def set_x5_angle(task):
+        if task == 'grab':
+            return 80
+        elif task == 'place':
+            return 190
+        else:
+            raise ValueError("Invalid task")
+
+    x5_deg = set_x5_angle(task)
     
 
     def equationsforBig(vars):
@@ -36,27 +38,28 @@ def solve_angles_deg(x,y,task):
     # solve in radians
     if(D>20 and D<40):
         x1_rad, x2_rad = fsolve(equationsforBig, initial_guess) 
+        x1_deg = np.degrees(x1_rad)
+        x2_deg = np.degrees(x2_rad)
+
+        x3_deg = x1_deg+x2_deg
+        x1_deg = 1.11*x1_deg 
+        x2_deg = abs(x2_deg-60)
+        x3_deg = 1.16667*x3_deg+140
+
+        return x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg
     elif(D>=5 and D<=20):
         x1_rad, x2_rad = fsolve(equationsforSmall, initial_guess)
+        return 0,0,0,0,0,0
     else:
         raise ValueError("Out of my buget range.")
     
     # convert to degrees
-    x1_deg = np.degrees(x1_rad)
-    x2_deg = np.degrees(x2_rad)
-    print(x1_deg, x2_deg)
 
-    x3_deg = x1_deg+x2_deg
-    x1_deg = 1.11*x1_deg 
-    x2_deg = abs(x2_deg-60)
-    x3_deg = 1.16667*x3_deg+140
-
-    return x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg
 
 
 # Desired horizontal distance in cm
 
-x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg = solve_angles_deg(0,39,'grab')
+x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg = solve_angles_deg(35,90,'grab')
 print(f"x0 = {x0_deg:.2f}°")
 print(f"x1 = {x1_deg:.2f}°")
 print(f"x2 = {x2_deg:.2f}°")

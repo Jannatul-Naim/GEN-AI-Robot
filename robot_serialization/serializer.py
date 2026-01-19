@@ -20,13 +20,7 @@ def set_default_position():
     move_joint(1, 100)
     move_joint(0, 120)
 
-
-
-
 set_default_position()
-
-
-
 
 time.sleep(0.2)
 while ser.in_waiting:
