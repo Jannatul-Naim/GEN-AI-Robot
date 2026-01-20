@@ -1,9 +1,8 @@
 import time
 import json
 
-from brain import Brain
+from brain import Brain, send_to_russparry
 from vision_client import get_vision
-from brain import send_to_russparry
 
 
 def main():
@@ -22,16 +21,15 @@ def main():
                 break
 
             vision = get_vision()
+            print("Vision data:", vision)
 
             result = brain.process(user_text, vision)
 
             print("\nBRAIN OUTPUT:")
             print(json.dumps(result, indent=2))
 
-            # Send motion plans only if present
             if result.get("plan"):
-                send_to_russparry(result)
-                print("→ Sent to Russparry")
+                send_to_russparry(result["plan"])
 
         except KeyboardInterrupt:
             print("\nInterrupted. Exiting.")
