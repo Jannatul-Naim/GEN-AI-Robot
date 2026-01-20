@@ -1,6 +1,6 @@
 source /home/naim/venv/bin/activate
 cd ~/GEN-AI-Robot
-python -m launch.run_vision_stack
+python -m vision
 
 source /home/naim/venv/bin/activate
 cd ~/GEN-AI-Robot

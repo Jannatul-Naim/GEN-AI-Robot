@@ -56,8 +56,8 @@ class Planner:
                 return o
         return None
 
-    def _degree(self, obj: Dict) -> float:
-        return obj.get("theta_deg", obj.get("degree", 0.0))
+    def _degree(self, obj):
+        return obj["theta_deg"]
 
     def pick(self, o: Dict) -> Dict:
         return {

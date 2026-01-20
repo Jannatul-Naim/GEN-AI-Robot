@@ -1,10 +1,11 @@
 import cv2
 import time
-import json
 import math
 import threading
 from flask import Flask, jsonify
 from ultralytics import YOLO
+
+
 
 
 CAMERA_INDEX = 0
@@ -13,8 +14,8 @@ CAM_HEIGHT = 480
 CAM_FPS = 12
 
 CAMERA_HFOV_DEG = 78.0
-CAMERA_TILT_DEG = 45.0        
-CAMERA_HEIGHT_CM = 52.0         
+CAMERA_TILT_DEG = 45
+CAMERA_HEIGHT_CM = 42
 
 
 YOLO_MODEL = "yolov8n.pt"
@@ -50,29 +51,30 @@ CY = CAM_HEIGHT / 2
 def pixel_to_ground(cx, cy, bw, name):
     real_w = OBJECT_WIDTHS_CM.get(name, 10.0)
 
-    # --- Horizontal bearing ---
     theta = math.atan((cx - CX) / FX)
 
-    # --- Vertical ray angle ---
     phi = math.atan((cy - CY) / FY)
 
-    # --- Total downward angle ---
     total_angle = phi + math.radians(CAMERA_TILT_DEG)
 
-    # --- Ground intersection distance ---
     if total_angle <= 0:
         return None
 
-    Z = CAMERA_HEIGHT_CM / math.tan(total_angle)
 
-    # --- Lateral position ---
+    Z_ground = CAMERA_HEIGHT_CM / math.tan(total_angle)
+
+    Z_width = (real_w * FX) / max(bw, 2)
+
+    Z = 0.7 * Z_ground + 0.3 * Z_width
+
     X = Z * math.tan(theta)
 
     return {
-        "z_cm": round(Z, 2),                         # forward distance
-        "theta_deg": round(math.degrees(theta)+4, 2), # bearing
+        "z_cm": round(Z, 2),
+        "theta_deg": round(math.degrees(theta), 2),
         "x_cm": round(X, 2)
     }
+
 
 
 class VisionThread(threading.Thread):
@@ -114,7 +116,7 @@ class VisionThread(threading.Thread):
                     conf = float(b.conf[0])
                     x1, y1, x2, y2 = map(int, b.xyxy[0])
                     cx = (x1 + x2) // 2
-                    cy = (y1 + y2) // 2
+                    cy = y2   
                     bw = max(x2 - x1, 2)
 
                     pose = pixel_to_ground(cx, cy, bw, name)
@@ -124,7 +126,9 @@ class VisionThread(threading.Thread):
                     objs.append({
                         "name": name,
                         "confidence": round(conf, 2),
-                        "pose": pose,
+                        "z_cm": pose["z_cm"],
+                        "theta_deg": pose["theta_deg"],
+                        "x_cm": pose["x_cm"],
                         "pixel": [cx, cy]
                     })
 

@@ -8,8 +8,9 @@ def solve_angles_deg(D,theta,task):
     initial_guess_deg=(30, -30)
     d = D-20  # adjust for base offset
     x4_deg = 30
-    x0_deg = theta  # base rotation angle
-    # convert initial guess to radians
+    x0_deg = theta 
+   
+   
     initial_guess = np.radians(initial_guess_deg)
 
     def set_x5_angle(task):
@@ -51,6 +52,10 @@ def solve_angles_deg(D,theta,task):
     elif(D>=5 and D<=20):
         x1_rad, x2_rad = fsolve(equationsforSmall, initial_guess)
         return 0,0,0,0,0,0
+    
+    if d < 5 or d > 40:
+        raise ValueError("Out of workspace")
+
     else:
         raise ValueError("Out of my buget range.")
     
@@ -60,10 +65,10 @@ def solve_angles_deg(D,theta,task):
 
 # Desired horizontal distance in cm
 
-x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg = solve_angles_deg(30,90,'grab')
-print(f"x0 = {x0_deg:.2f}°")
-print(f"x1 = {x1_deg:.2f}°")
-print(f"x2 = {x2_deg:.2f}°")
-print(f"x3 = {x3_deg:.2f}°")
-print(f"x4 = {x4_deg:.2f}°")
-print(f"x5 = {x5_deg:.2f}°")
+# x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg = solve_angles_deg(30,90,'grab')
+# print(f"x0 = {x0_deg:.2f}°")
+# print(f"x1 = {x1_deg:.2f}°")
+# print(f"x2 = {x2_deg:.2f}°")
+# print(f"x3 = {x3_deg:.2f}°")
+# print(f"x4 = {x4_deg:.2f}°")
+# print(f"x5 = {x5_deg:.2f}°")
