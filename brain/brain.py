@@ -1,295 +1,248 @@
 import json
 import requests
-import time
 import re
+from typing import Dict, List, Optional
 
 # ===================== CONFIG =====================
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3:8b"
-MIN_CONFIDENCE = 0.6
-LLM_TIMEOUT = 20
 
-RUSSPARRY_URL = "http://192.168.0.109:9000/robot"
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "qwen2.5:3b"
+LLM_TIMEOUT = 20
+MIN_CONFIDENCE = 0.6
+RUSSPARRY_URL = "http://10.221.100.204:9000/robot"
 
 
 # ===================== MEMORY =====================
-class Memory:
+
+class RobotMemory:
     def __init__(self):
         self.holding = None
+        self.last_command = None
+        self.last_failed_action = None
+        self.task_context = None
+        self.user_preferences = {}
+        self.safety_state = "normal"  # normal | stop | error
 
-    def set_holding(self, obj_name):
-        self.holding = obj_name
+    def set_holding(self, obj):
+        self.holding = obj
 
-    def clear(self):
+    def clear_holding(self):
         self.holding = None
 
-# ===================== PLANNER =====================
-class Planner:
-    def find_object(self, name, objects):
-        candidates = [
-            o for o in objects
-            if o["name"] == name and o["confidence"] >= MIN_CONFIDENCE
-        ]
-        if not candidates:
-            return None
-        return min(candidates, key=lambda x: x["distance_cm"])
+    def set_last_command(self, cmd):
+        self.last_command = cmd
 
-    def pick(self, obj):
+    def set_failure(self, action):
+        self.last_failed_action = action
+
+    def clear_failure(self):
+        self.last_failed_action = None
+
+    def emergency_stop(self):
+        self.safety_state = "stop"
+
+    def reset_safety(self):
+        self.safety_state = "normal"
+
+
+# ===================== PLANNER =====================
+
+class Planner:
+    def find(self, name: str, objects: List[Dict]) -> Optional[Dict]:
+        if not name:
+            return None
+        for o in objects:
+            if o.get("name") == name and o.get("confidence", 0) >= MIN_CONFIDENCE:
+                return o
+        return None
+
+    def _degree(self, obj: Dict) -> float:
+        return obj.get("theta_deg", obj.get("degree", 0.0))
+
+    def pick(self, o: Dict) -> Dict:
         return {
             "action": "pick",
-            "object": obj["name"],
-            "grasp_center": obj["grasp_center"],
-            "distance_cm": obj["distance_cm"]
+            "object": o["name"],
+            "grasp": {
+                "z_cm": o.get("z_cm", 0),
+                "degree": self._degree(o)
+            }
         }
 
-    def place(self):
+    def place_beside(self, ref: Dict) -> Dict:
         return {
             "action": "place",
-            "target": "table",
-            "place_pose": [0.45, 0.12, 0.0]
+            "target": "beside",
+            "reference": {
+                "name": ref["name"],
+                "z_cm": ref.get("z_cm", 0),
+                "degree": self._degree(ref)
+            }
         }
 
+    def give(self) -> Dict:
+        return {"action": "give"}
+
+
 # ===================== LLM =====================
+
 class LLM:
-    def safe_json_parse(self, text):
-        if not text:
-            return None
+    def parse(self, text: str) -> Optional[Dict]:
         try:
-            match = re.search(r"\{[\s\S]*\}", text)
-            if not match:
-                return None
-            return json.loads(match.group(0))
-        except Exception as e:
-            print("[LLM JSON ERROR]:", e)
-            print("[RAW OUTPUT]:", text)
+            m = re.search(r"\{[\s\S]*\}", text)
+            return json.loads(m.group(0)) if m else None
+        except:
             return None
 
-    def decide(self, text, objects, holding):
-        prompt = f"""
-You are an embodied robotic reasoning system controlling a physical robot arm.
+    def build_prompt(self, command, objects, holding):
+        return f"""
+You are a robot action interpreter for a real physical robot arm.
 
-CORE PRINCIPLES:
-- You exist in the real world
-- You can only act on objects you can see
-- Vision data is ground truth
-- You cannot invent objects, actions, or locations
-- Physics and robot state cannot be violated
+CURRENT STATE:
+Holding: {holding if holding else "nothing"}
 
-ROBOT STATE:
-- Currently holding: {holding}
-
-VISIBLE OBJECTS (ground truth):
+VISIBLE OBJECTS:
 {json.dumps(objects, indent=2)}
 
-TASK:
-Interpret the human command and decide the robot's next intent.
+RULES:
+- Use only visible objects
+- Never invent objects
+- One goal only
+- One hand only
+- If unsafe or unclear, intent=chat
+- If object not visible, intent=chat
+- No steps, no explanations
+- Output JSON ONLY
 
-REASONING RULES:
-- If command asks to see, describe, confirm, or list objects → intent = "chat"
-- Chat replies MUST only reference visible objects
-- If requested object is visible → confirm it
-- If not visible → say you cannot see it
-- If robot is already holding something → picking is forbidden
-- If placing while holding nothing → chat
-- If command is impossible or ambiguous → chat
-- If command is "stop" → stop immediately
+INTENTS:
+pick, place, give, chat, stop
 
-INTENT DEFINITIONS:
-- pick  : grasp a visible object
-- place : release the currently held object onto the table
-- stop  : immediately stop all actions
-- chat  : respond verbally using ONLY visible objects
-
-OUTPUT FORMAT (STRICT):
-Return ONLY valid JSON.
-
+OUTPUT FORMAT:
 {{
-  "intent": "pick | place | stop | chat | give",
-  "target": null | string,
+  "intent": "pick|place|give|chat|stop",
+  "target": null|string,
+  "reference": null|string,
   "reply": string
 }}
 
-HUMAN COMMAND:
-{text}
+COMMAND:
+{command}
 """
+
+    def decide(self, command: str, objects: List[Dict], holding: Optional[str]) -> Optional[Dict]:
         try:
             r = requests.post(
                 OLLAMA_URL,
                 json={
                     "model": OLLAMA_MODEL,
-                    "prompt": prompt,
+                    "prompt": self.build_prompt(command, objects, holding),
                     "stream": False,
-                    "options": {
-                        "temperature": 0,
-                        "stop": ["```"]
-                    }
+                    "options": {"temperature": 0}
                 },
                 timeout=LLM_TIMEOUT
             )
-            raw = r.json().get("response", "")
-            return self.safe_json_parse(raw)
-
-        except requests.exceptions.RequestException as e:
-            print("[LLM ERROR]:", e)
+            return self.parse(r.json().get("response", ""))
+        except:
             return None
 
+
 # ===================== BRAIN =====================
+
 class Brain:
     def __init__(self):
-        self.memory = Memory()
+        self.memory = RobotMemory()
         self.planner = Planner()
         self.llm = LLM()
 
-    def deterministic_fallback(self, text):
-        t = text.lower().strip()
-        if t == "stop":
-            return {"intent": "stop", "target": None, "reply": "Stopping."}
-        return None
+    def process(self, text: str, vision: Dict) -> Dict:
+        self.memory.set_last_command(text)
 
-    def process(self, user_text, vision):
-        # Filter vision by confidence
-        objects = [
-            o for o in vision.get("objects", [])
-            if o["confidence"] >= MIN_CONFIDENCE
-        ]
+        if self.memory.safety_state == "stop":
+            return {"intent": "stop", "reply": "Emergency stop active.", "plan": []}
 
-        decision = self.llm.decide(user_text, objects, self.memory.holding)
-        if decision is None:
-            decision = self.deterministic_fallback(user_text)
+        objects = vision.get("objects", [])
+        decision = self.llm.decide(text, objects, self.memory.holding)
 
         if not decision:
-            return {
-                "intent": "chat",
-                "reply": "I did not understand the command.",
-                "plan": []
-            }
+            self.memory.set_failure("llm")
+            return {"intent": "chat", "reply": "I did not understand.", "plan": []}
 
-        # ================= STOP =================
-        if decision["intent"] == "stop":
-            return {
-                "intent": "stop",
-                "reply": "Robot stopped.",
-                "plan": []
-            }
+        self.memory.clear_failure()
+        intent = decision["intent"]
+        plan = []
 
-        # ================= PLACE =================
-        if decision["intent"] == "place":
+        if intent == "stop":
+            self.memory.emergency_stop()
+            return {"intent": "stop", "reply": "Stopping robot.", "plan": []}
+
+        if intent == "chat":
+            return {"intent": "chat", "reply": decision.get("reply", ""), "plan": []}
+
+        if intent == "give":
             if not self.memory.holding:
-                return {
-                    "intent": "chat",
-                    "reply": "I am not holding anything.",
-                    "plan": []
-                }
+                obj = self.planner.find(decision["target"], objects)
+                if not obj:
+                    return {"intent": "chat", "reply": "I cannot see that.", "plan": []}
+                plan.append(self.planner.pick(obj))
+                self.memory.set_holding(obj["name"])
+            plan.append(self.planner.give())
+            self.memory.clear_holding()
+            return {"intent": "give", "reply": decision["reply"], "plan": plan}
 
-            released = self.memory.holding
-            self.memory.clear()
-
-            return {
-                "intent": "place",
-                "reply": f"Placed the {released}.",
-                "plan": [self.planner.place()]
-            }
-
-        # ================= PICK =================
-        if decision["intent"] == "pick":
+        if intent == "pick":
             if self.memory.holding:
-                return {
-                    "intent": "chat",
-                    "reply": f"I am already holding {self.memory.holding}.",
-                    "plan": []
-                }
-
-            target = decision.get("target")
-            if not target or target == "it":
-                return {
-                    "intent": "chat",
-                    "reply": "Please specify which object to pick.",
-                    "plan": []
-                }
-
-            obj = self.planner.find_object(target, objects)
+                return {"intent": "chat", "reply": "I am already holding something.", "plan": []}
+            obj = self.planner.find(decision["target"], objects)
             if not obj:
-                return {
-                    "intent": "chat",
-                    "reply": f"I cannot see a {target}.",
-                    "plan": []
-                }
-
-            # NOTE: memory should ideally update AFTER motion success
+                return {"intent": "chat", "reply": "I cannot see that.", "plan": []}
+            plan.append(self.planner.pick(obj))
             self.memory.set_holding(obj["name"])
+            return {"intent": "pick", "reply": decision["reply"], "plan": plan}
 
-            return {
-                "intent": "pick",
-                "reply": decision["reply"],
-                "plan": [self.planner.pick(obj)]
-            }
+        if intent == "place":
+            if not self.memory.holding:
+                obj = self.planner.find(decision["target"], objects)
+                ref = self.planner.find(decision["reference"], objects)
+                if not obj or not ref:
+                    return {"intent": "chat", "reply": "Objects not visible.", "plan": []}
+                plan.append(self.planner.pick(obj))
+                self.memory.set_holding(obj["name"])
+            ref = self.planner.find(decision["reference"], objects)
+            if not ref:
+                return {"intent": "chat", "reply": "Reference not visible.", "plan": []}
+            plan.append(self.planner.place_beside(ref))
+            self.memory.clear_holding()
+            return {"intent": "place", "reply": decision["reply"], "plan": plan}
 
-        # ================= CHAT =================
-        if decision["intent"] == "chat":
-            # Safety: grounding enforcement
-            tgt = decision.get("target")
-            if tgt:
-                names = {o["name"] for o in objects}
-                if tgt not in names:
-                    decision["reply"] = f"I cannot see a {tgt}."
+        return {"intent": "chat", "reply": "Command not executable.", "plan": []}
 
-            return {
-                "intent": "chat",
-                "reply": decision["reply"],
-                "plan": []
-            }
 
-        return {
-            "intent": "chat",
-            "reply": "Unhandled command.",
-            "plan": []
-        }
-        if decision["intent"] == "give":
-            pass
-#==================== Server Code ====================
-def send_to_russparry(data):
+# ===================== RUSSPARRY =====================
+
+def send_to_russparry(plan: List[Dict]):
+    if not plan:
+        return
     try:
-        requests.post(RUSSPARRY_URL, json=data, timeout=3)
-    except requests.exceptions.RequestException:
+        print("Sending to Russparry:", plan)
+        requests.post(RUSSPARRY_URL, json={"plan": plan}, timeout=3)
+    except:
         pass
 
 
+# ===================== RUN =====================
 
-# ===================== TEST =====================
-def test_brain():
-    yolo_data = {
-        "objects":  [
-    {
-    "name": "cup",
-    "z_cm": 11.99,
-    "degree": 27.99
-  },
-  {
-    "name": "bottle",
-    "z_cm": 17.67,
-    "degree": -6.64
-  }
-] 
-    }
-
+if __name__ == "__main__":
     brain = Brain()
 
-    tests = [
-        "see the cup",
-        "pick bottle",
-        "pick cup",
-        "place it",
-        "what can you see",
-        "pick book",
-        "stop"
-    ]
+    vision_data = {
+        "objects": [
+            {"name": "bottle", "confidence": 0.67, "pixel": [527, 296], "theta_deg": 27.65, "z_cm": 63.85},
+            {"name": "cup", "confidence": 0.74, "pixel": [310, 280], "theta_deg": 5.0, "z_cm": 62.0}
+        ]
+    }
 
-    for cmd in tests:
-        print("\nUSER:", cmd)
-        result = brain.process(cmd, yolo_data)
-        print(json.dumps(result, indent=2))
-        send_to_russparry(result)
-        print("Sent to Russparry: ", result)
-        time.sleep(1)
-if __name__ == "__main__":
-    test_brain()
+    while True:
+        cmd = input("USER> ")
+        output = brain.process(cmd, vision_data)
+        print("BRAIN OUTPUT:\n", json.dumps(output, indent=2))
+        send_to_russparry(output["plan"])

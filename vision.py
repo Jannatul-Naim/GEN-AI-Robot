@@ -3,19 +3,20 @@ import time
 import json
 import math
 import threading
+from flask import Flask, jsonify
 from ultralytics import YOLO
 
-# ===================== CAMERA CONFIG =====================
+
 CAMERA_INDEX = 0
 CAM_WIDTH = 640
 CAM_HEIGHT = 480
 CAM_FPS = 12
 
 CAMERA_HFOV_DEG = 78.0
-CAMERA_TILT_DEG = 45.0           # 🔥 FIXED 45 DEG
-CAMERA_HEIGHT_CM = 40.0          # 🔥 CAMERA HEIGHT FROM FLOOR
+CAMERA_TILT_DEG = 45.0        
+CAMERA_HEIGHT_CM = 52.0         
 
-# ===================== YOLO CONFIG =====================
+
 YOLO_MODEL = "yolov8n.pt"
 YOLO_IMGSZ = 320
 YOLO_CONF = 0.45
@@ -28,7 +29,7 @@ OBJECT_WIDTHS_CM = {
     "apple": 8.0
 }
 
-# ===================== SYSTEM =====================
+
 SHOW_CAMERA = True
 INFER_INTERVAL = 0.35
 
@@ -36,7 +37,7 @@ vision_state = {"objects": [], "fps": 0, "timestamp": 0.0}
 vision_lock = threading.Lock()
 stop_event = threading.Event()
 
-# ===================== CAMERA INTRINSICS =====================
+
 def focal_length_px(w, hfov):
     return (w / 2) / math.tan(math.radians(hfov / 2))
 
@@ -45,7 +46,7 @@ FY = FX
 CX = CAM_WIDTH / 2
 CY = CAM_HEIGHT / 2
 
-# ===================== GEOMETRY (45° TILT CORRECT) =====================
+
 def pixel_to_ground(cx, cy, bw, name):
     real_w = OBJECT_WIDTHS_CM.get(name, 10.0)
 
@@ -69,11 +70,11 @@ def pixel_to_ground(cx, cy, bw, name):
 
     return {
         "z_cm": round(Z, 2),                         # forward distance
-        "theta_deg": round(math.degrees(theta), 2), # bearing
+        "theta_deg": round(math.degrees(theta)+4, 2), # bearing
         "x_cm": round(X, 2)
     }
 
-# ===================== VISION THREAD =====================
+
 class VisionThread(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -156,17 +157,27 @@ class VisionThread(threading.Thread):
 
         self.cap.release()
         cv2.destroyAllWindows()
+        
 
-# ===================== MAIN =====================
-def main():
-    VisionThread().start()
-    try:
-        while not stop_event.is_set():
-            with vision_lock:
-                print(json.dumps(vision_state, indent=2))
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        stop_event.set()
+
+
+
+
+app = Flask(__name__)
+
+@app.route("/vision", methods=["GET"])
+def vision():
+    with vision_lock:
+        return jsonify(vision_state)
 
 if __name__ == "__main__":
-    main()
+    print("[SYSTEM] Starting vision system...", flush=True)
+
+    vision_thread = VisionThread()
+    vision_thread.start()
+
+    try:
+        app.run(host="0.0.0.0", port=9100, debug=False)
+    finally:
+        stop_event.set()
+        print("[SYSTEM] Shutdown", flush=True)

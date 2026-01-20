@@ -7,7 +7,7 @@ from scipy.optimize import fsolve
 def solve_angles_deg(D,theta,task):
     initial_guess_deg=(30, -30)
     d = D-20  # adjust for base offset
-    x4_deg = 60
+    x4_deg = 30
     x0_deg = theta  # base rotation angle
     # convert initial guess to radians
     initial_guess = np.radians(initial_guess_deg)
@@ -40,11 +40,12 @@ def solve_angles_deg(D,theta,task):
         x1_rad, x2_rad = fsolve(equationsforBig, initial_guess) 
         x1_deg = np.degrees(x1_rad)
         x2_deg = np.degrees(x2_rad)
-
+        print("DEGREE",x1_deg,x2_deg)
+         # calculate wrist angle    
         x3_deg = x1_deg+x2_deg
-        x1_deg = 1.11*x1_deg 
-        x2_deg = abs(x2_deg-60)
-        x3_deg = 1.16667*x3_deg+140
+        x1_deg = 1.11*x1_deg
+        x2_deg = x2_deg*(-1.11)+60
+        x3_deg = 1.16667*x3_deg+150
 
         return x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg
     elif(D>=5 and D<=20):
@@ -59,7 +60,7 @@ def solve_angles_deg(D,theta,task):
 
 # Desired horizontal distance in cm
 
-x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg = solve_angles_deg(35,90,'grab')
+x0_deg,x1_deg, x2_deg, x3_deg,x4_deg,x5_deg = solve_angles_deg(30,90,'grab')
 print(f"x0 = {x0_deg:.2f}°")
 print(f"x1 = {x1_deg:.2f}°")
 print(f"x2 = {x2_deg:.2f}°")
