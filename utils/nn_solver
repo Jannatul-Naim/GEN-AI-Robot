@@ -1,0 +1,86 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+# ================= CONFIG =================
+EPOCHS = 3000
+LR = 1e-3
+
+# motor angle limits (degrees)
+ANGLE_MIN = -90.0
+ANGLE_MAX = 90.0
+
+# ================= NN MODEL =================
+class MotorAngleNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 4),
+        
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+# ================= DATA (EXAMPLE) =================
+# Replace this with your real IK / simulator / recorded data
+def generate_data(samples=6000):
+    X = []
+    Y = []
+
+    for _ in range(samples):
+        x, y, z = np.random.uniform(-1, 1, 3)
+
+        # Fake inverse kinematics (placeholder)
+        a1 = x * 0.8
+        a2 = y * 0.6
+        a3 = z * 0.7
+        a4 = (x + y + z) / 3.0
+
+        X.append([x, y, z])
+        Y.append([a1, a2, a3, a4])
+
+    return (
+        torch.tensor(X, dtype=torch.float32),
+        torch.tensor(Y, dtype=torch.float32)
+    )
+
+
+# ================= TRAIN =================
+X, Y = generate_data()
+
+model = MotorAngleNN()
+optimizer = optim.Adam(model.parameters(), lr=LR)
+loss_fn = nn.MSELoss()
+
+for epoch in range(EPOCHS):
+    optimizer.zero_grad()
+    pred = model(X)
+    loss = loss_fn(pred, Y)
+    loss.backward()
+    optimizer.step()
+
+    if epoch % 300 == 0:
+        print(f"Epoch {epoch} | Loss: {loss.item():.6f}")
+
+print("✅ Training done")
+
+
+# ================= INFERENCE =================
+def predict_motor_angles(x, y, z):
+    inp = torch.tensor([[x, y, z]], dtype=torch.float32)
+    out = model(inp).detach().numpy()[0]
+
+    angles = ANGLE_MIN + (out + 1) * 0.5 * (ANGLE_MAX - ANGLE_MIN)
+    return angles
+
+
+# ================= TEST =================
+angles = predict_motor_angles(0.3, -0.4, 0.2)
+print("Motor angles (deg):", angles)

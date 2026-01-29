@@ -1,0 +1,849 @@
+PC : 
+Brain:
+import json
+import requests
+import re
+from typing import Dict, List, Optional
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "gpt-oss:120b-cloud"
+LLM_TIMEOUT = 250
+MIN_CONFIDENCE = 0.6
+RUSSPARRY_URL = "http://10.237.216.204:9000/robot"
+
+
+class RobotMemory:
+    def __init__(self):
+        self.holding = None
+        self.safety_state = "normal"
+
+    def snapshot(self):
+        return {
+            "holding": self.holding,
+            "safety_state": self.safety_state
+        }
+
+    def stop(self):
+        self.safety_state = "stop"
+
+    def reset(self):
+        self.holding = None
+        self.safety_state = "normal"
+
+
+class Planner:
+    def find(self, name, objects, mode=None):
+        candidates = [
+            o for o in objects
+            if o.get("name") == name and o.get("confidence", 0) >= MIN_CONFIDENCE
+        ]
+        if not candidates:
+            return None
+        if mode == "farthest":
+            return max(candidates, key=lambda o: o.get("z_cm", 0))
+        if mode == "nearest":
+            return min(candidates, key=lambda o: o.get("z_cm", 0))
+        return candidates[0]
+
+    def pick(self, obj):
+        return {
+            "action": "pick",
+            "object": obj["name"]
+        }
+
+    def place(self, x, z):
+        return {
+            "action": "place",
+            "x": x,
+            "z": z
+        }
+
+    def give(self):
+        return {
+            "action": "give"
+        }
+
+
+class LLM:
+    def extract(self, text):
+        try:
+            m = re.search(r"\{[\s\S]*\}", text)
+            if not m:
+                return None
+            return json.loads(m.group(0))
+        except:
+            return None
+
+    def prompt(self, cmd, objects, memory):
+        return f"""
+You control a REAL robot arm.
+
+X AXIS:
+negative = left
+positive = right
+
+Z AXIS:
+front = 25
+
+RULES:
+- Use only visible objects
+- Never invent objects
+- Max 2 steps
+- If unsafe or unclear -> chat
+- If multiple objects exist, resolve far / nearest
+- If place without reference -> place front (z=25)
+- Output JSON ONLY
+
+VISIBLE OBJECTS:
+{json.dumps(objects)}
+
+MEMORY:
+{json.dumps(memory)}
+
+FORMAT:
+{{
+  "intent": "task|chat|stop",
+  "steps": [
+    {{
+      "action": "pick|place|give",
+      "target": string|null,
+      "mode": "farthest|nearest|null",
+      "relation": "left|right|front|null",
+      "reference": string|null
+    }}
+  ],
+  "reply": "short"
+}}
+
+COMMAND:
+{cmd}
+"""
+
+    def decide(self, cmd, objects, memory):
+        r = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": self.prompt(cmd, objects, memory),
+                "stream": False,
+                "options": {"temperature": 0}
+            },
+            timeout=LLM_TIMEOUT
+        )
+        return self.extract(r.json().get("response", ""))
+
+
+class Brain:
+    def __init__(self):
+        self.memory = RobotMemory()
+        self.planner = Planner()
+        self.llm = LLM()
+
+    def process(self, cmd, vision):
+        if self.memory.safety_state == "stop":
+            return {"intent": "stop", "plan": [], "reply": "Stopped"}
+
+        objects = vision.get("objects", [])
+        decision = self.llm.decide(cmd, objects, self.memory.snapshot())
+
+        if not decision:
+            return {"intent": "chat", "plan": [], "reply": "I did not understand"}
+
+        if decision["intent"] == "stop":
+            self.memory.stop()
+            return {"intent": "stop", "plan": [], "reply": "Stopping"}
+
+        if decision["intent"] == "chat":
+            return {"intent": "chat", "plan": [], "reply": decision.get("reply", "")}
+
+        plan = []
+
+        for step in decision.get("steps", []):
+            if step["action"] == "pick":
+                if self.memory.holding:
+                    return {"intent": "chat", "plan": [], "reply": "Already holding"}
+                obj = self.planner.find(
+                    step.get("target"),
+                    objects,
+                    mode=step.get("mode")
+                )
+                if not obj:
+                    return {"intent": "chat", "plan": [], "reply": "Object not visible"}
+                plan.append(self.planner.pick(obj))
+                self.memory.holding = obj["name"]
+
+            elif step["action"] == "place":
+                if not self.memory.holding:
+                    return {"intent": "chat", "plan": [], "reply": "Nothing to place"}
+                relation = step.get("relation")
+                if relation == "left":
+                    x = -10
+                    z = 25
+                elif relation == "right":
+                    x = 10
+                    z = 25
+                else:
+                    x = 0
+                    z = 25
+                plan.append(self.planner.place(x, z))
+                self.memory.holding = None
+
+            elif step["action"] == "give":
+                if not self.memory.holding:
+                    return {"intent": "chat", "plan": [], "reply": "Nothing to give"}
+                plan.append(self.planner.give())
+                self.memory.holding = None
+
+        return {"intent": "task", "plan": plan, "reply": decision.get("reply", "")}
+
+
+def send_to_russparry(plan):
+    if not plan:
+        return
+    print(json.dumps({"plan": plan}, indent=2))
+    try:
+        requests.post(
+            RUSSPARRY_URL,
+            json={"plan": plan},
+            timeout=30
+        )
+    except requests.exceptions.ConnectTimeout:
+        print("❌ Russparry timeout: server unreachable")
+    except requests.exceptions.ConnectionError:
+        print("❌ Russparry connection error")
+Run Brain:
+import time
+import json
+
+from brain import Brain, send_to_russparry
+from vision_client import get_vision
+
+
+def main():
+    brain = Brain()
+
+    print("🧠 Brain online. Type commands (or 'quit').")
+
+    while True:
+        try:
+            user_text = input("\nUSER> ").strip()
+            if not user_text:
+                continue
+
+            if user_text.lower() in ("quit", "exit"):
+                print("Shutting down brain.")
+                break
+
+            vision = get_vision()
+            print("Vision data:", vision)
+
+            result = brain.process(user_text, vision)
+
+            print("\nBRAIN OUTPUT:")
+            print(json.dumps(result, indent=2))
+
+            if result.get("plan"):
+                send_to_russparry(result["plan"])
+
+        except KeyboardInterrupt:
+            print("\nInterrupted. Exiting.")
+            break
+
+        except Exception as e:
+            print("[BRAIN ERROR]:", e)
+            time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    main()
+
+vision client :
+import requests
+
+VISION_URL = "http://localhost:9100/vision"
+
+def get_vision():
+    try:
+        r = requests.get(VISION_URL, timeout=1)
+        return r.json()
+    except requests.exceptions.RequestException:
+        return {"objects": []}
+vision :
+import cv2
+import time
+import math
+import threading
+from flask import Flask, jsonify
+from ultralytics import YOLO
+
+
+
+
+CAMERA_INDEX = 2
+CAM_WIDTH = 640
+CAM_HEIGHT = 480
+CAM_FPS = 12
+
+CAMERA_HFOV_DEG = 75
+CAMERA_TILT_DEG = 15
+CAMERA_HEIGHT_CM = 30
+
+
+YOLO_MODEL = "yolov8n.pt"
+YOLO_IMGSZ = 320
+YOLO_CONF = 0.45
+
+TARGET_CLASSES = ["bottle", "cup", "apple"]
+
+OBJECT_WIDTHS_CM = {
+    "bottle": 5.0,
+    "cup": 10.0,
+    "apple": 8.0
+}
+
+
+SHOW_CAMERA = True
+INFER_INTERVAL = 0.35
+
+vision_state = {"objects": [], "fps": 0, "timestamp": 0.0}
+vision_lock = threading.Lock()
+stop_event = threading.Event()
+
+
+def focal_length_px(w, hfov):
+    return (w / 2) / math.tan(math.radians(hfov / 2))
+
+FX = focal_length_px(CAM_WIDTH, CAMERA_HFOV_DEG)
+FY = FX
+CX = CAM_WIDTH / 2
+CY = CAM_HEIGHT / 2
+
+
+def pixel_to_ground(cx, cy, bw, name):
+    real_w = OBJECT_WIDTHS_CM.get(name, 10.0)
+
+    theta = math.atan((cx - CX) / FX)
+
+    phi = math.atan((cy - CY) / FY)
+
+    total_angle = phi + math.radians(CAMERA_TILT_DEG)
+
+    if total_angle <= 0:
+        return None
+
+
+    Z_ground = CAMERA_HEIGHT_CM / math.tan(total_angle)
+
+    Z_width = (real_w * FX) / max(bw, 2)
+
+    Z = 0.7 * Z_ground + 0.3 * Z_width
+
+    X = Z * math.tan(theta)
+
+    return {
+        "z_cm": round(Z, 2),
+        "theta_deg": round(math.degrees(theta), 2),
+        "x_cm": round(X, 2)
+    }
+
+
+
+class VisionThread(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.model = YOLO(YOLO_MODEL)
+        self.cap = cv2.VideoCapture(CAMERA_INDEX)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+        self.cap.set(cv2.CAP_PROP_FPS, CAM_FPS)
+        self.last = time.time()
+        self.prev = time.time()
+
+    def run(self):
+        if SHOW_CAMERA:
+            cv2.namedWindow("Vision")
+
+        while not stop_event.is_set():
+            if time.time() - self.last < INFER_INTERVAL:
+                time.sleep(0.002)
+                continue
+
+            self.last = time.time()
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+
+            results = self.model(frame, imgsz=YOLO_IMGSZ, conf=YOLO_CONF, verbose=False)
+            objs = []
+
+            r = results[0]
+            if r.boxes:
+                for b in r.boxes:
+                    cls = int(b.cls[0])
+                    name = self.model.names[cls]
+                    if name not in TARGET_CLASSES:
+                        continue
+
+                    conf = float(b.conf[0])
+                    x1, y1, x2, y2 = map(int, b.xyxy[0])
+                    cx = (x1 + x2) // 2
+                    cy = y2   
+                    bw = max(x2 - x1, 2)
+
+                    pose = pixel_to_ground(cx, cy, bw, name)
+                    if pose is None:
+                        continue
+
+                    objs.append({
+                        "name": name,
+                        "confidence": round(conf, 2),
+                        "z_cm": pose["z_cm"],
+                        "theta_deg": pose["theta_deg"],
+                        "x_cm": pose["x_cm"],
+                        "pixel": [cx, cy]
+                    })
+
+                    if SHOW_CAMERA:
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.putText(
+                            frame,
+                            f"{name} Z:{pose['z_cm']}cm θ:{pose['x_cm']}°",
+                            (x1, y1 - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 255, 0),
+                            2
+                        )
+
+            fps = int(1 / max(time.time() - self.prev, 0.001))
+            self.prev = time.time()
+
+            with vision_lock:
+                vision_state["objects"] = objs
+                vision_state["fps"] = fps
+                vision_state["timestamp"] = time.time()
+
+            if SHOW_CAMERA:
+                cv2.putText(frame, f"FPS {fps}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+                cv2.imshow("Vision", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    stop_event.set()
+
+        self.cap.release()
+        cv2.destroyAllWindows()
+        
+
+
+
+
+
+app = Flask(__name__)
+
+@app.route("/vision", methods=["GET"])
+def vision():
+    with vision_lock:
+        return jsonify(vision_state)
+
+if __name__ == "__main__":
+    print("[SYSTEM] Starting vision system...", flush=True)
+
+    vision_thread = VisionThread()
+    vision_thread.start()
+
+    try:
+        app.run(host="0.0.0.0", port=9100, debug=False)
+    finally:
+        stop_event.set()
+        print("[SYSTEM] Shutdown", flush=True)
+
+
+PI :
+ik solver :
+import numpy as np
+from scipy.optimize import fsolve
+
+def solve_angles_deg(D, x):
+    # -------- workspace ----------
+    # D = np.clip(D, 18, 45)
+    d = D - 10 # base offset
+    print(x," ",D)
+    # -------- base ----------
+    x0_deg = np.arccos(x/D)
+
+    # -------- link lengths ----------
+    if D > 25:
+        L1, L2 = 10.5, 12.5
+    else:
+        L1, L2 = 8.5, 10.5
+
+    # -------- equations ----------
+    def equations(vars):
+        x1, x2 = vars
+        return [
+            L1*np.cos(x1) + L2*np.cos(x2) - d,
+            L1*np.sin(x1) + L2*np.sin(x2)
+        ]
+
+    # dynamic initial guess (CRITICAL)
+    guess = np.radians((40, -60))
+    x1_rad, x2_rad = fsolve(equations, guess, maxfev=200)
+
+    x1_deg = np.degrees(x1_rad)
+    x2_deg = np.degrees(x2_rad)
+
+    # -------- wrist compensation ----------
+    x3_deg = -x2_deg
+    x4_deg = 60  # fixed wrist rotate
+
+    # -------- servo calibration ----------
+    x1_servo = 1.11 * x1_deg
+    x2_servo = (-1.11 * x2_deg) + 60 + x1_servo
+    x3_servo = (1.1667 * x3_deg) + 150
+    print(x1_deg,x2_deg,x3_deg)
+    return (
+        int(x0_deg),
+        int(x1_servo),
+        int(x2_servo),
+        int(x3_servo),
+        int(x4_deg)
+    )
+
+
+Main:
+from flask import Flask, request, jsonify
+import time
+import serial
+import threading
+import queue
+import numpy as np
+
+from utils.ik_solver import solve_angles_deg
+
+
+PORT = "/dev/ttyUSB0"
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=0.1, exclusive=True)
+time.sleep(2)
+
+SERIAL_LOCK = threading.Lock()
+
+def send(cmd):
+    with SERIAL_LOCK:
+        ser.write(cmd.encode())
+        print("[SERIAL]", cmd.strip())
+
+def move_joint(joint, angle):
+    angle = int(np.clip(angle, JOINT_LIMITS[joint][0], JOINT_LIMITS[joint][1]))
+    send(f"J {joint} {angle}\n")
+
+
+JOINT_LIMITS = {
+    0: (-180, 180),
+    1: (0, 320),
+    2: (0, 320),
+    3: (60, 320),
+    4: (-130, 320),
+    
+}
+
+SAFE_Z = 20
+MAX_Z = 38
+
+
+def apply_ik(x, z):
+    z = float(np.clip(z, 10, MAX_Z))
+    angles = solve_angles_deg(z, x)
+    for i, a in enumerate(angles):
+        move_joint(i, a)
+        time.sleep(0.05)
+
+
+def set_default_position():
+    move_joint(4, 40)
+    move_joint(3, 210)
+    move_joint(2, 220)
+    move_joint(1, 100)
+    move_joint(0, 120)
+    time.sleep(0.4)
+
+
+def set_give_position():
+    move_joint(2, 130)
+    move_joint(3, 180)
+    move_joint(1, 100)
+    time.sleep(0.4)
+
+
+TASK_QUEUE = queue.Queue()
+STOP_EVENT = threading.Event()
+
+
+def execute_step(step):
+    if STOP_EVENT.is_set():
+        return
+
+    action = step["action"]
+    x = float(step.get("x", 0))
+    z = float(step.get("z", SAFE_Z))
+
+    apply_ik(x, SAFE_Z)
+    time.sleep(0.2)
+
+    if STOP_EVENT.is_set():
+        return
+
+    if action == "pick":
+        apply_ik(x, z)
+        time.sleep(1.0)
+
+    elif action == "place":
+        apply_ik(x, z)
+        time.sleep(0.6)
+
+    elif action == "give":
+        apply_ik(x, z)
+        time.sleep(0.6)
+        set_give_position()
+        time.sleep(2.0)
+
+    else:
+        return
+
+    apply_ik(x, SAFE_Z)
+    time.sleep(0.2)
+
+
+def worker():
+    set_default_position()
+
+    while not STOP_EVENT.is_set():
+        try:
+            plan = TASK_QUEUE.get(timeout=0.1)
+        except queue.Empty:
+            continue
+
+        try:
+            for step in plan:
+                if STOP_EVENT.is_set():
+                    break
+                execute_step(step)
+        finally:
+            time.sleep(0.4)
+            set_default_position()
+            TASK_QUEUE.task_done()
+
+
+threading.Thread(target=worker, daemon=True).start()
+
+
+app = Flask(__name__)
+
+@app.route("/robot", methods=["POST"])
+def robot():
+    data = request.get_json(force=True, silent=True)
+
+    if not data or "plan" not in data:
+        return jsonify({"error": "invalid"}), 400
+
+    if not isinstance(data["plan"], list):
+        return jsonify({"error": "plan must be list"}), 400
+
+    TASK_QUEUE.put(data["plan"])
+    return jsonify({"status": "accepted"}), 202
+
+
+@app.route("/stop", methods=["POST"])
+def stop():
+    STOP_EVENT.set()
+    set_default_position()
+    return jsonify({"status": "stopped"}), 200
+
+
+if __name__ == "__main__":
+    print("[SYSTEM] Russparry Online")
+    app.run(host="0.0.0.0", port=9000)
+
+
+
+
+ESP : 
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+#define SERVO_FREQ 50
+#define SERVO_MIN_US 600
+#define SERVO_MAX_US 2400
+#define SERVO_STEP_DELAY 15
+
+// ================= IR SENSORS =================
+#define IR_OPEN_PIN   26      // IR for OPEN
+#define IR_CLOSE_PIN  27      // IR for CLOSE
+#define IR_DETECTED   HIGH    // change to LOW if inverted
+
+#define GRIP_OPEN_ANGLE  40
+#define GRIP_CLOSE_ANGLE 100
+
+Adafruit_PWMServoDriver pwm(0x40);
+
+// ================= JOINT CHANNELS =================
+enum {
+  BASE = 0,
+  SHOULDER1,
+  SHOULDER2,
+  ELBOW,
+  WRIST,
+  GRIPPER
+};
+
+int jointMin[6] = {10, 10, 10, 10, 10, 40};
+int jointMax[6] = {170,170,320,320,320,130};
+
+int currentDeg[6] = {90, 90, 90, 90, 90, GRIP_OPEN_ANGLE};
+
+// ================= LOW LEVEL =================
+uint16_t usToPulse(int us) {
+  return map(us, 0, 20000, 0, 4095);
+}
+
+void writeServo(uint8_t ch, int deg) {
+  deg = constrain(deg, jointMin[ch], jointMax[ch]);
+  int us = map(deg, 0, 180, SERVO_MIN_US, SERVO_MAX_US);
+  pwm.setPWM(ch, 0, usToPulse(us));
+}
+
+void moveServoSlow(uint8_t ch, int targetDeg) {
+  targetDeg = constrain(targetDeg, jointMin[ch], jointMax[ch]);
+  int step = (targetDeg > currentDeg[ch]) ? 1 : -1;
+
+  while (currentDeg[ch] != targetDeg) {
+    currentDeg[ch] += step;
+    writeServo(ch, currentDeg[ch]);
+    delay(SERVO_STEP_DELAY);
+  }
+}
+
+// ================= GRIPPER IR LOGIC =================
+void handleGripperIR() {
+
+  bool irOpen  = (digitalRead(IR_OPEN_PIN)  == IR_DETECTED);
+  bool irClose = (digitalRead(IR_CLOSE_PIN) == IR_DETECTED);
+
+  // Safety priority: OPEN > CLOSE
+  if (irOpen) {
+    if (currentDeg[GRIPPER] != GRIP_OPEN_ANGLE)
+      moveServoSlow(GRIPPER, GRIP_OPEN_ANGLE);
+  }
+  else if (irClose) {
+    if (currentDeg[GRIPPER] != GRIP_CLOSE_ANGLE)
+      moveServoSlow(GRIPPER, GRIP_CLOSE_ANGLE);
+  }
+}
+
+// ================= SERIAL COMMANDS =================
+void processJointCmd(int id, int deg) {
+  if (id < 0 || id > 5) return;
+
+  // Block manual gripper when IR active
+  if (id == GRIPPER &&
+     (digitalRead(IR_OPEN_PIN)  == IR_DETECTED ||
+      digitalRead(IR_CLOSE_PIN) == IR_DETECTED))
+    return;
+
+  moveServoSlow(id, deg);
+}
+
+void processAllCmd(int *v) {
+  bool moving = true;
+
+  while (moving) {
+    moving = false;
+
+    handleGripperIR();
+
+    for (int i = 0; i < 6; i++) {
+
+      // Skip gripper if IR active
+      if (i == GRIPPER &&
+         (digitalRead(IR_OPEN_PIN)  == IR_DETECTED ||
+          digitalRead(IR_CLOSE_PIN) == IR_DETECTED))
+        continue;
+
+      int target = constrain(v[i], jointMin[i], jointMax[i]);
+
+      if (currentDeg[i] != target) {
+        moving = true;
+        currentDeg[i] += (target > currentDeg[i]) ? 1 : -1;
+        writeServo(i, currentDeg[i]);
+      }
+    }
+    delay(SERVO_STEP_DELAY);
+  }
+}
+
+// ================= SETUP =================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(IR_OPEN_PIN, INPUT);
+  pinMode(IR_CLOSE_PIN, INPUT);
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  pwm.begin();
+  pwm.setPWMFreq(SERVO_FREQ);
+  delay(300);
+
+  for (int i = 0; i < 6; i++)
+    writeServo(i, currentDeg[i]);
+}
+
+// ================= LOOP =================
+void loop() {
+
+  // 🔥 ALWAYS WATCH IR
+  handleGripperIR();
+
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd.startsWith("J")) {
+      int id, deg;
+      if (sscanf(cmd.c_str(), "J %d %d", &id, &deg) == 2)
+        processJointCmd(id, deg);
+    }
+
+    else if (cmd.startsWith("A")) {
+      int v[6];
+      if (sscanf(cmd.c_str(),
+        "A %d %d %d %d %d %d",
+        &v[0], &v[1], &v[2],
+        &v[3], &v[4], &v[5]) == 6) {
+        processAllCmd(v);
+      }
+    }
+  }
+}
+#define RXD2 16
+#define TXD2 17
+
+void setup() {
+  Serial.begin(115200);          // Debug (optional)
+  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
+
+  pinMode(IR_OPEN_PIN, INPUT);
+  pinMode(IR_CLOSE_PIN, INPUT);
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  pwm.begin();
+  pwm.setPWMFreq(SERVO_FREQ);
+  delay(300);
+
+  for (int i = 0; i < 6; i++)
+    writeServo(i, currentDeg[i]);
+}
+
