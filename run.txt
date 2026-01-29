@@ -1,0 +1,4 @@
+/home/naim/anaconda3/bin/python /home/naim/GEN-AI-Robot/brain/run_brain.py
+
+
+/home/naim/anaconda3/bin/python /home/naim/GEN-AI-Robot/vision/main.py

@@ -49,14 +49,12 @@ def solve_angles_deg(D, x):
     a4_deg = 60
 
     # ---------------- SERVO MAP -------------
-    s1 = int(1.11 * a1_deg)
-    s2 = int((-1.11 * a2_deg) + 60 + s1)
-    s3 = int((1.1667 * a3_deg) + 150)
+
 
     return (
         int(x0_deg),
-        s1,
-        s2,
-        s3,
+        int(a1_deg),
+        int(a2_deg),
+        int(a3_deg),
         int(a4_deg)
     )

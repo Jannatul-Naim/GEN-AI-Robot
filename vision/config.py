@@ -1,0 +1,27 @@
+CAMERA_INDEX = 0
+CAM_WIDTH = 640
+CAM_HEIGHT = 480
+CAM_FPS = 30
+
+CAMERA_HEIGHT_CM = 30.0
+CAMERA_TILT_DEG = 15.0
+CAMERA_HFOV_DEG = 75.0
+
+
+
+YOLO_MODEL = "yolov8n.pt"
+YOLO_IMGSZ = 320
+YOLO_CONF = 0.45
+INFER_INTERVAL = 0.25
+
+TARGET_CLASSES = ["bottle", "cup", "apple"]
+
+
+
+OBJECT_WIDTHS_CM = {
+    "bottle": 5.0,
+    "cup": 10.0,
+    "apple": 8.0
+}
+
+SHOW_CAMERA = False
