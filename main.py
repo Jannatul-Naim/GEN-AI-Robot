@@ -1,4 +1,3 @@
-# main.py (PI)
 from flask import Flask, request, jsonify
 import time, serial, threading, queue
 import numpy as np

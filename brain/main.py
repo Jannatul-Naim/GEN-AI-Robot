@@ -1,8 +1,8 @@
 import time
 import json
 
-from brain import Brain, send_to_russparry
-from vision_client import get_vision
+from brain import Brain
+from server import send_to_russparry, get_vision
 
 
 def main():
