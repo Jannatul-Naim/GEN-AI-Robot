@@ -6,6 +6,18 @@ def create_server(state, lock):
     @app.route("/vision", methods=["GET"])
     def vision():
         with lock:
-            return jsonify(state)
+            cleaned_objects = [
+                {
+                    "name": obj["name"],
+                    "x_cm": obj["x_cm"],
+                    "z_cm": obj["z_cm"]
+            }
+            for obj in state["objects"]
+        ]
+
+        return jsonify({
+        "objects": cleaned_objects
+    })
+
 
     return app
