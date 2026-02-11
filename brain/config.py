@@ -1,10 +1,10 @@
 RUSSPARRY_URL = "http://10.237.216.204:9000/robot"
-
 VISION_URL = "http://localhost:9100/vision"
+OLLAMA_URL = "http://localhost:11434/api/generate"
 
-OLLAMA_URL = "http://localhost:11434/api/v1/llm/brain"
-MIN_CONFIDENCE = 0.6
+MIN_CONFIDENCE = 0.05
 MAX_TOKENS = 1000
 TEMPERATURE = 0.2
-OLLAMA_MODEL = "gpt-oss:120b-cloud"
 
+OLLAMA_MODEL = "gpt-oss:120b-cloud"
+LLM_TIMEOUT = 10.0

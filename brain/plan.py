@@ -1,12 +1,6 @@
-import config
-
-
 class Planner:
     def find(self, name, objects, mode=None):
-        candidates = [
-            o for o in objects
-            if o.get("name") == name and o.get("confidence", 0) >= config.MIN_CONFIDENCE
-        ]
+        candidates = [o for o in objects if o.get("name") == name]
         if not candidates:
             return None
         if mode == "farthest":
@@ -15,10 +9,25 @@ class Planner:
             return min(candidates, key=lambda o: o.get("z_cm", 0))
         return candidates[0]
 
+    def resolve_relation(self, relation, reference, objects):
+        ref = self.find(reference, objects)
+        if not ref:
+            return None
+        rx = ref.get("x_cm", 0)
+        rz = ref.get("z_cm", 25)
+        if relation == "left":
+            return rx - 10, rz
+        if relation == "right":
+            return rx + 10, rz
+        if relation == "front":
+            return rx, 25
+        return rx, rz
+
     def pick(self, obj):
         return {
             "action": "pick",
-            "object": obj["name"]
+            "x": obj.get("x_cm", 0),
+            "z": obj.get("z_cm", 25)
         }
 
     def place(self, x, z):
@@ -29,7 +38,4 @@ class Planner:
         }
 
     def give(self):
-        return {
-            "action": "give"
-        }
-
+        return {"action": "give"}

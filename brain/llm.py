@@ -1,44 +1,19 @@
 import json
 import requests
-import re
 import config
 
 
 class LLM:
     def extract(self, text):
         try:
-            m = re.search(r"\{[\s\S]*\}", text)
-            if not m:
-                return None
-            return json.loads(m.group(0))
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            return json.loads(text[start:end])
         except:
             return None
 
     def prompt(self, cmd, objects, memory):
-        return f"""
-You control a REAL robot arm.
-
-X AXIS:
-negative = left
-positive = right
-
-Z AXIS:
-front = 25
-
-RULES:
-- Use only visible objects
-- Never invent objects
-- Max 2 steps
-- If unsafe or unclear -> chat
-- If multiple objects exist, resolve far / nearest
-- If place without reference -> place front (z=25)
-- Output JSON ONLY
-
-VISIBLE OBJECTS:
-{json.dumps(objects)}
-
-MEMORY:
-{json.dumps(memory)}
+        return f"""Return ONLY valid JSON.
 
 FORMAT:
 {{
@@ -47,7 +22,7 @@ FORMAT:
     {{
       "action": "pick|place|give",
       "target": string|null,
-      "mode": "farthest|nearest|null",
+      "mode": "nearest|farthest|null",
       "relation": "left|right|front|null",
       "reference": string|null
     }}
@@ -55,7 +30,17 @@ FORMAT:
   "reply": "short"
 }}
 
-COMMAND:
+World:
+X negative=left, positive=right
+Z front=25, larger=further
+
+Visible objects:
+{json.dumps(objects)}
+
+Memory:
+{json.dumps(memory)}
+
+Command:
 {cmd}
 """
 
@@ -66,11 +51,27 @@ COMMAND:
                 "model": config.OLLAMA_MODEL,
                 "prompt": self.prompt(cmd, objects, memory),
                 "stream": False,
-                "options": {"temperature": 0}
+                "options": {
+                    "temperature": config.TEMPERATURE,
+                    "num_predict": config.MAX_TOKENS
+                }
             },
             timeout=config.LLM_TIMEOUT
         )
-        return self.extract(r.json().get("response", ""))
+        try:
+            raw = r.json().get("response", "")
+        except:
+            raw = r.text
+        return self.extract(raw)
 
-
+def test():
+    llm = LLM()
+    cmd = "Pick up the nearest bottle and place it to the right of the cup."
+    objects = [
+        {"name": "bottle", "x_cm": -10, "z_cm": 30},
+        {"name": "cup", "x_cm": 10, "z_cm": 30}
+    ]
+    memory = []
+    decision = llm.decide(cmd, objects, memory)
+    print(json.dumps(decision, indent=2))
 

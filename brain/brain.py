@@ -14,54 +14,58 @@ class Brain:
             return {"intent": "stop", "plan": [], "reply": "Stopped"}
 
         objects = vision.get("objects", [])
+        self.memory.update_scene(objects)
+
         decision = self.llm.decide(cmd, objects, self.memory.snapshot())
 
-        if not decision:
+        if not isinstance(decision, dict):
             return {"intent": "chat", "plan": [], "reply": "I did not understand"}
 
-        if decision["intent"] == "stop":
+        intent = decision.get("intent")
+        if intent not in ("task", "chat", "stop"):
+            return {"intent": "chat", "plan": [], "reply": "I did not understand"}
+
+        if intent == "stop":
             self.memory.stop()
             return {"intent": "stop", "plan": [], "reply": "Stopping"}
 
-        if decision["intent"] == "chat":
+        if intent == "chat":
             return {"intent": "chat", "plan": [], "reply": decision.get("reply", "")}
 
         plan = []
 
         for step in decision.get("steps", []):
-            if step["action"] == "pick":
+            action = step.get("action")
+
+            if action == "pick":
                 if self.memory.holding:
                     return {"intent": "chat", "plan": [], "reply": "Already holding"}
-                obj = self.planner.find(
-                    step.get("target"),
-                    objects,
-                    mode=step.get("mode")
-                )
+                obj = self.planner.find(step.get("target"), objects, mode=step.get("mode"))
                 if not obj:
                     return {"intent": "chat", "plan": [], "reply": "Object not visible"}
                 plan.append(self.planner.pick(obj))
                 self.memory.holding = obj["name"]
 
-            elif step["action"] == "place":
+            elif action == "place":
                 if not self.memory.holding:
                     return {"intent": "chat", "plan": [], "reply": "Nothing to place"}
                 relation = step.get("relation")
-                if relation == "left":
-                    x = -10
-                    z = 25
-                elif relation == "right":
-                    x = 10
-                    z = 25
+                reference = step.get("reference")
+                if relation and reference:
+                    pos = self.planner.resolve_relation(relation, reference, objects)
+                    if not pos:
+                        return {"intent": "chat", "plan": [], "reply": "Reference object not visible"}
+                    x, z = pos
                 else:
-                    x = 0
-                    z = 25
+                    x, z = 0, 25
                 plan.append(self.planner.place(x, z))
                 self.memory.holding = None
 
-            elif step["action"] == "give":
+            elif action == "give":
                 if not self.memory.holding:
                     return {"intent": "chat", "plan": [], "reply": "Nothing to give"}
                 plan.append(self.planner.give())
                 self.memory.holding = None
 
+        self.memory.update_plan(plan, cmd)
         return {"intent": "task", "plan": plan, "reply": decision.get("reply", "")}

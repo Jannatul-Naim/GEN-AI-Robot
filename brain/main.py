@@ -25,9 +25,6 @@ def main():
 
             result = brain.process(user_text, vision)
 
-            print("\nBRAIN OUTPUT:")
-            print(json.dumps(result, indent=2))
-
             if result.get("plan"):
                 send_to_russparry(result["plan"])
 
