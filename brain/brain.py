@@ -69,3 +69,24 @@ class Brain:
 
         self.memory.update_plan(plan, cmd)
         return {"intent": "task", "plan": plan, "reply": decision.get("reply", "")}
+
+def test_brain():
+    brain = Brain()
+    vision = {"objects": [{"name": "red block", "x": 10, "z": 20}]}
+
+    # Test picking an object
+    result = brain.process("Pick up the red block", vision)
+    assert result["intent"] == "task"
+    assert len(result["plan"]) == 1
+    assert brain.memory.holding == "red block"
+
+    # Test placing the object
+    result = brain.process("Place it on the table", vision)
+    assert result["intent"] == "task"
+    assert len(result["plan"]) == 2
+    assert brain.memory.holding is None
+
+    # Test stopping
+    result = brain.process("Stop", vision)
+    assert result["intent"] == "stop"
+    assert brain.memory.safety_state == "stop"

@@ -1,39 +1,47 @@
 import numpy as np
+from scipy.optimize import least_squares
 
-L1 = 10.5
-L2 = 12.5
+def dof3(d, h, tol=1e-4):
 
-def solve_angles_deg(z, x):
-    x = float(x)   # left/right
-    z = float(z)   # radial distance
+    def equations(x):
+        x1, x2 = x
+        eq1 = 10.5 + 12.5*np.cos(np.deg2rad(x1)) + 17.5*np.cos(np.deg2rad(x2)) - d
+        eq2 = 12.5*np.sin(np.deg2rad(x1)) + 17.5*np.sin(np.deg2rad(x2)) - h
+        return [eq1, eq2]
 
-    # ---------- BASE ----------
-    theta0 = np.arcsin(x / z) if z != 0 else 0.0
-    
-    # ---------- PLANAR DISTANCE ----------
-    r = np.clip(z, 6.0, L1 + L2 - 0.5)
+    lower_bounds = [0, -120]
+    upper_bounds = [160, 0]
 
-    # ---------- ELBOW ----------
-    c2 = (r*r - L1*L1 - L2*L2) / (2*L1*L2)
-    c2 = np.clip(c2, -1.0, 1.0)
-    theta2 = np.arccos(c2)
+    solutions = []
 
-    # ---------- SHOULDER ----------
-    phi = 0.0
-    psi = np.arctan2(L2*np.sin(theta2),
-                     L1 + L2*np.cos(theta2))
-    theta1 = phi - psi
+    # Scan different starting guesses
+    for x1_guess in np.linspace(0,120,9):
+        for x2_guess in np.linspace(-120,0,9):
 
-    # ---------- WRIST ----------
-    theta3 = -(theta1 + theta2)
+            sol = least_squares(
+                equations,
+                [x1_guess, x2_guess],
+                bounds=(lower_bounds, upper_bounds)
+            )
 
-    return (
-        int(theta0),
-        int(np.degrees(theta1)),
-        int(np.degrees(theta2)),
-        int(np.degrees(theta3))
-    )
-def test():
-    print(solve_angles_deg(10, 10))
+            x1, x2 = sol.x
 
-test()
+            # --- Cross Check ---
+            eq1_check = 10.5 + 12.5*np.cos(np.deg2rad(x1)) + 17.5*np.cos(np.deg2rad(x2))
+            eq2_check = 12.5*np.sin(np.deg2rad(x1)) + 17.5*np.sin(np.deg2rad(x2))
+
+            if abs(eq1_check - d) < tol and abs(eq2_check - h) < tol:
+
+                # Check duplicate
+                duplicate = False
+                for s in solutions:
+                    if np.linalg.norm(np.array(s)-np.array([x1,x2])) < 0.5:
+                        duplicate = True
+                        break
+
+                if not duplicate:
+                    solutions.append([x1, x2])
+
+    return solutions
+
+print(dof3(d=32, h=1))
