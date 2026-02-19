@@ -1,6 +1,6 @@
 import json
 import requests
-import config
+from . import config
 
 
 class LLM:
@@ -21,10 +21,7 @@ FORMAT:
   "steps": [
     {{
       "action": "pick|place|give",
-      "target": string|null,
-      "mode": "nearest|farthest|null",
-      "relation": "left|right|front|null",
-      "reference": string|null
+      "position": [x_cm, z_cm]|null
     }}
   ],
   "reply": "short"
@@ -66,7 +63,7 @@ Command:
 
 def test():
     llm = LLM()
-    cmd = "Pick up the nearest bottle and place it to the right of the cup."
+    cmd = "Pick up the nearest bottle and pick up the cup."
     objects = [
         {"name": "bottle", "x_cm": -10, "z_cm": 30},
         {"name": "cup", "x_cm": 10, "z_cm": 30}

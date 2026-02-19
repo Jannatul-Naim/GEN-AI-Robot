@@ -20,11 +20,16 @@ def main():
                 print("Shutting down brain.")
                 break
 
-            vision = get_vision()
+            # vision = get_vision()
+            vision = dict(zip(["objects"], [[
+                {"name": "bottle", "x_cm": -10, "z_cm": 30},
+                {"name": "cup", "x_cm": 10, "z_cm": 30}
+            ]]))
+            print(type(vision))
             print("Vision data:", vision)
 
             result = brain.process(user_text, vision)
-
+            print(json.dumps(result, indent=2))
             if result.get("plan"):
                 send_to_russparry(result["plan"])
 

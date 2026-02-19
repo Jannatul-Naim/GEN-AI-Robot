@@ -1,6 +1,5 @@
 vision/
-│
-├── main.py                
+│              
 ├── brain.py              
 ├── llm.py            
 ├── memory.py              
@@ -9,6 +8,7 @@ vision/
 ├── plan.py              
 ├── __init__.py
 └── .FILE.txt
+main.py  
 
 
 
@@ -23,7 +23,7 @@ Model :
 
 ⚙️ config.py
 
-RUSSPARRY_URL = "http://10.237.216.204:9000/robot"
+RUSSPARRY_URL = "http://localhost:9000/robot"
 VISION_URL = "http://localhost:9100/vision"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
@@ -135,10 +135,7 @@ FORMAT:
   "steps": [
     {{
       "action": "pick|place|give",
-      "target": string|null,
-      "mode": "nearest|farthest|null",
-      "relation": "left|right|front|null",
-      "reference": string|null
+      "position": [x_cm, z_cm]|null
     }}
   ],
   "reply": "short"
@@ -180,7 +177,7 @@ Command:
 
 def test():
     llm = LLM()
-    cmd = "Pick up the nearest bottle and place it to the right of the cup."
+    cmd = "Pick up the nearest bottle and pick up the cup."
     objects = [
         {"name": "bottle", "x_cm": -10, "z_cm": 30},
         {"name": "cup", "x_cm": 10, "z_cm": 30}
@@ -305,8 +302,8 @@ class Planner:
 import time
 import json
 
-from brain import Brain
-from server import send_to_russparry, get_vision
+from brain.brain import Brain
+from brain.server import send_to_russparry, get_vision
 
 
 def main():
@@ -324,11 +321,16 @@ def main():
                 print("Shutting down brain.")
                 break
 
-            vision = get_vision()
+            # vision = get_vision()
+            vision = dict(zip(["objects"], [[
+                {"name": "bottle", "x_cm": -10, "z_cm": 30},
+                {"name": "cup", "x_cm": 10, "z_cm": 30}
+            ]]))
+            print(type(vision))
             print("Vision data:", vision)
 
             result = brain.process(user_text, vision)
-
+            print(json.dumps(result, indent=2))
             if result.get("plan"):
                 send_to_russparry(result["plan"])
 

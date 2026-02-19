@@ -31,3 +31,28 @@ class RobotMemory:
         self.last_objects = []
         self.last_plan = []
         self.last_command = None
+
+def test_memory():
+    mem = RobotMemory()
+    assert mem.holding is None
+    assert mem.safety_state == "normal"
+    assert mem.last_objects == []
+    assert mem.last_plan == []
+    assert mem.last_command is None
+
+    mem.update_scene([{"name": "bottle"}, {"name": "cup"}])
+    assert mem.last_objects == [{"name": "bottle"}, {"name": "cup"}]
+
+    mem.update_plan(["pick bottle", "place on table"], "Pick up the bottle and place it on the table")
+    assert mem.last_plan == ["pick bottle", "place on table"]
+    assert mem.last_command == "Pick up the bottle and place it on the table"
+
+    mem.stop()
+    assert mem.safety_state == "stop"
+
+    mem.reset()
+    assert mem.holding is None
+    assert mem.safety_state == "normal"
+    assert mem.last_objects == []
+    assert mem.last_plan == []
+    assert mem.last_command is None

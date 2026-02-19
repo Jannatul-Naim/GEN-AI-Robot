@@ -1,6 +1,6 @@
 import requests
 import json
-import config
+from . import config
 
 
 def get_vision():
@@ -12,12 +12,10 @@ def get_vision():
     
 
 def send_to_russparry(plan):
-
     print(json.dumps({"plan to send in : ": plan}, indent=2))
 
     if not plan:
         return
-    
     try:
         requests.post(
             config.RUSSPARRY_URL,

@@ -10,35 +10,56 @@ class SpeechToText:
         self.model = Model(model_path)
         self.recognizer = KaldiRecognizer(self.model, self.sample_rate)
         self.audio_queue = queue.Queue()
+        self.stream = None
+        self.mic_on = False
 
     def _callback(self, indata, frames, time, status):
-        if status:
-            print(status)
-        self.audio_queue.put(bytes(indata))
+        if self.mic_on:
+            self.audio_queue.put(bytes(indata))
 
-    def listen(self):
-        """Generator: yields recognized text"""
-        with sd.RawInputStream(
+    def mic_on_start(self):
+        if self.mic_on:
+            return
+        self.mic_on = True
+        self.stream = sd.RawInputStream(
             samplerate=self.sample_rate,
             blocksize=8000,
             dtype="int16",
             channels=1,
             callback=self._callback
-        ):
-            print("🎤 Listening...")
-            while True:
-                data = self.audio_queue.get()
-                if self.recognizer.AcceptWaveform(data):
-                    result = json.loads(self.recognizer.Result())
-                    text = result.get("text", "").strip()
-                    if text:
-                        yield text
+        )
+        self.stream.start()
+        print("🎤 Mic ON")
 
-stt = SpeechToText("vosk-model-small-en-us-0.15")
+    def mic_off(self):
+        self.mic_on = False
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+        print("🔇 Mic OFF")
 
-for text in stt.listen():
-    print("You said:", text)
+    def listen(self):
+        while self.mic_on:
+            data = self.audio_queue.get()
+            if self.recognizer.AcceptWaveform(data):
+                result = json.loads(self.recognizer.Result())
+                text = result.get("text", "").strip()
+                if text:
+                    yield text
 
-    if "stop" in text:
-        print("🛑 Stopping")
-        break
+
+def main():
+    stt = SpeechToText("vosk-model-small-en-us-0.15")
+    stt.mic_on_start()
+
+    for sentence in stt.listen():
+        print("You said:", sentence)
+
+        if "stop" in sentence:
+            stt.mic_off()
+            break
+
+
+
+main()

@@ -38,7 +38,7 @@ class ConstrainedIK3DOF:
 
                 x1, x2 = sol.x
 
-                # Cross-check
+
                 check = equations([x1, x2])
 
                 if abs(check[0]) < tol and abs(check[1]) < tol:
