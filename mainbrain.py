@@ -1,9 +1,8 @@
 import time
 import json
 
-from brain import Brain
-from server import send_to_russparry, get_vision
-
+from brain.brain import Brain
+from brain.server import send_to_russparry, get_vision
 
 def main():
     brain = Brain()
@@ -25,8 +24,6 @@ def main():
                 {"name": "bottle", "x_cm": -10, "z_cm": 30},
                 {"name": "cup", "x_cm": 10, "z_cm": 30}
             ]]))
-            print(type(vision))
-            print("Vision data:", vision)
 
             result = brain.process(user_text, vision)
             print(json.dumps(result, indent=2))

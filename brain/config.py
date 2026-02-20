@@ -9,4 +9,4 @@ TEMPERATURE = 0.2
 OLLAMA_MODEL = "gpt-oss:120b-cloud"
 LLM_TIMEOUT = 20.0
 
-MOCK_VISION = False
+MOCK_VISION = True

@@ -10,6 +10,7 @@ class Brain:
         self.llm = LLM()
 
     def process(self, cmd, vision):
+        
         if self.memory.safety_state == "stop":
             return {"intent": "stop", "plan": [], "reply": "Stopped"}
 

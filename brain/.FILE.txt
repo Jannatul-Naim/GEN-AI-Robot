@@ -8,7 +8,7 @@ vision/
 ├── plan.py              
 ├── __init__.py
 └── .FILE.txt
-main.py  
+mainbrain.py  
 
 
 
@@ -18,10 +18,11 @@ REQUIREMENTS : requests
 
 
 
-Model : 
+Codes : 
 
 
 ⚙️ config.py
+
 
 RUSSPARRY_URL = "http://localhost:9000/robot"
 VISION_URL = "http://localhost:9100/vision"
@@ -32,7 +33,71 @@ MAX_TOKENS = 1000
 TEMPERATURE = 0.2
 
 OLLAMA_MODEL = "gpt-oss:120b-cloud"
-LLM_TIMEOUT = 10.0
+LLM_TIMEOUT = 20.0
+
+MOCK_VISION = True
+
+
+💾 memory.py
+
+class RobotMemory:
+    def __init__(self):
+        self.holding = None
+        self.safety_state = "normal"
+        self.last_objects = []
+        self.last_plan = []
+        self.last_command = None
+
+    def snapshot(self):
+        return {
+            "holding": self.holding,
+            "safety_state": self.safety_state,
+            "last_objects": self.last_objects,
+            "last_plan": self.last_plan,
+            "last_command": self.last_command
+        }
+
+    def update_scene(self, objects):
+        self.last_objects = objects
+
+    def update_plan(self, plan, cmd):
+        self.last_plan = plan
+        self.last_command = cmd
+
+    def stop(self):
+        self.safety_state = "stop"
+
+    def reset(self):
+        self.holding = None
+        self.safety_state = "normal"
+        self.last_objects = []
+        self.last_plan = []
+        self.last_command = None
+
+def test_memory():
+    mem = RobotMemory()
+    assert mem.holding is None
+    assert mem.safety_state == "normal"
+    assert mem.last_objects == []
+    assert mem.last_plan == []
+    assert mem.last_command is None
+
+    mem.update_scene([{"name": "bottle"}, {"name": "cup"}])
+    assert mem.last_objects == [{"name": "bottle"}, {"name": "cup"}]
+
+    mem.update_plan(["pick bottle", "place on table"], "Pick up the bottle and place it on the table")
+    assert mem.last_plan == ["pick bottle", "place on table"]
+    assert mem.last_command == "Pick up the bottle and place it on the table"
+
+    mem.stop()
+    assert mem.safety_state == "stop"
+
+    mem.reset()
+    assert mem.holding is None
+    assert mem.safety_state == "normal"
+    assert mem.last_objects == []
+    assert mem.last_plan == []
+    assert mem.last_command is None
 
 
 
@@ -109,6 +174,51 @@ class Brain:
 
         self.memory.update_plan(plan, cmd)
         return {"intent": "task", "plan": plan, "reply": decision.get("reply", "")}
+
+
+🎯 plan.py
+
+class Planner:
+    def find(self, name, objects, mode=None):
+        candidates = [o for o in objects if o.get("name") == name]
+        if not candidates:
+            return None
+        if mode == "farthest":
+            return max(candidates, key=lambda o: o.get("z_cm", 0))
+        if mode == "nearest":
+            return min(candidates, key=lambda o: o.get("z_cm", 0))
+        return candidates[0]
+
+    def resolve_relation(self, relation, reference, objects):
+        ref = self.find(reference, objects)
+        if not ref:
+            return None
+        rx = ref.get("x_cm", 0)
+        rz = ref.get("z_cm", 25)
+        if relation == "left":
+            return rx - 10, rz
+        if relation == "right":
+            return rx + 10, rz
+        if relation == "front":
+            return rx, 25
+        return rx, rz
+
+    def pick(self, obj):
+        return {
+            "action": "pick",
+            "x": obj.get("x_cm", 0),
+            "z": obj.get("z_cm", 25)
+        }
+
+    def place(self, x, z):
+        return {
+            "action": "place",
+            "x": x,
+            "z": z
+        }
+
+    def give(self):
+        return {"action": "give"}
 
 
 ֎ llm.py
@@ -188,47 +298,13 @@ def test():
 
 
 
-💾 memory.py
-class RobotMemory:
-    def __init__(self):
-        self.holding = None
-        self.safety_state = "normal"
-        self.last_objects = []
-        self.last_plan = []
-        self.last_command = None
-
-    def snapshot(self):
-        return {
-            "holding": self.holding,
-            "safety_state": self.safety_state,
-            "last_objects": self.last_objects,
-            "last_plan": self.last_plan,
-            "last_command": self.last_command
-        }
-
-    def update_scene(self, objects):
-        self.last_objects = objects
-
-    def update_plan(self, plan, cmd):
-        self.last_plan = plan
-        self.last_command = cmd
-
-    def stop(self):
-        self.safety_state = "stop"
-
-    def reset(self):
-        self.holding = None
-        self.safety_state = "normal"
-        self.last_objects = []
-        self.last_plan = []
-        self.last_command = None
 
 
 
 🌐 server.py
 import requests
 import json
-import config
+from . import config
 
 
 def get_vision():
@@ -255,59 +331,21 @@ def send_to_russparry(plan):
     except requests.exceptions.RequestException as e:
         print("❌ Russparry error:", e)
 
-🎯 plan.py
-class Planner:
-    def find(self, name, objects, mode=None):
-        candidates = [o for o in objects if o.get("name") == name]
-        if not candidates:
-            return None
-        if mode == "farthest":
-            return max(candidates, key=lambda o: o.get("z_cm", 0))
-        if mode == "nearest":
-            return min(candidates, key=lambda o: o.get("z_cm", 0))
-        return candidates[0]
 
-    def resolve_relation(self, relation, reference, objects):
-        ref = self.find(reference, objects)
-        if not ref:
-            return None
-        rx = ref.get("x_cm", 0)
-        rz = ref.get("z_cm", 25)
-        if relation == "left":
-            return rx - 10, rz
-        if relation == "right":
-            return rx + 10, rz
-        if relation == "front":
-            return rx, 25
-        return rx, rz
 
-    def pick(self, obj):
-        return {
-            "action": "pick",
-            "x": obj.get("x_cm", 0),
-            "z": obj.get("z_cm", 25)
-        }
 
-    def place(self, x, z):
-        return {
-            "action": "place",
-            "x": x,
-            "z": z
-        }
+🚀 mainbrain.py
 
-    def give(self):
-        return {"action": "give"}
 
-🚀 main.py
 import time
 import json
 
-from brain.brain import Brain
+from brain import Brain
 from brain.server import send_to_russparry, get_vision
-
+import brain
 
 def main():
-    brain = Brain()
+    brain = brain.Brain()
 
     print("🧠 Brain online. Type commands (or 'quit').")
 
