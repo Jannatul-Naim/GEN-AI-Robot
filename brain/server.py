@@ -10,19 +10,3 @@ def get_vision():
     except requests.exceptions.RequestException:
         return {"objects": []}
     
-
-def send_to_russparry(plan):
-    print(json.dumps({"plan to send in : ": plan}, indent=2))
-
-    if not plan:
-        return
-    try:
-        requests.post(
-            config.RUSSPARRY_URL,
-            json={"plan": plan},
-            timeout=10
-        )
-    except requests.exceptions.ConnectTimeout:
-        print("❌ Russparry timeout: server unreachable")
-    except requests.exceptions.RequestException as e:
-        print("❌ Russparry error:", e)

@@ -1,4 +1,3 @@
-
 import json
 import queue
 
@@ -62,7 +61,6 @@ class SpeechToText:
 
 
 def test():
-    # ---- Safe Absolute Path ----
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     MODEL_PATH = os.path.join(BASE_DIR, "models", "vosk-model-small-en-us-0.15")
 

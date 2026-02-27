@@ -1,0 +1,385 @@
+vision/
+│              
+├── brain.py              
+├── llm.py            
+├── memory.py              
+├── server.py   
+├── config.py 
+├── plan.py              
+├── __init__.py
+└── .FILE.txt
+mainbrain.py  
+
+
+
+
+REQUIREMENTS : requests
+               
+
+
+
+Codes : 
+
+
+⚙️ config.py
+
+
+RUSSPARRY_URL = "http://localhost:9000/robot"
+VISION_URL = "http://localhost:9100/vision"
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
+MIN_CONFIDENCE = 0.6
+MAX_TOKENS = 1000
+TEMPERATURE = 0.2
+
+OLLAMA_MODEL = "gpt-oss:120b-cloud"
+LLM_TIMEOUT = 20.0
+
+MOCK_VISION = True
+
+
+💾 memory.py
+
+class RobotMemory:
+    def __init__(self):
+        self.holding = None
+        self.safety_state = "normal"
+        self.last_objects = []
+        self.last_plan = []
+        self.last_command = None
+
+    def snapshot(self):
+        return {
+            "holding": self.holding,
+            "safety_state": self.safety_state,
+            "last_objects": self.last_objects,
+            "last_plan": self.last_plan,
+            "last_command": self.last_command
+        }
+
+    def update_scene(self, objects):
+        self.last_objects = objects
+
+    def update_plan(self, plan, cmd):
+        self.last_plan = plan
+        self.last_command = cmd
+
+    def stop(self):
+        self.safety_state = "stop"
+
+    def reset(self):
+        self.holding = None
+        self.safety_state = "normal"
+        self.last_objects = []
+        self.last_plan = []
+        self.last_command = None
+
+def test_memory():
+    mem = RobotMemory()
+    assert mem.holding is None
+    assert mem.safety_state == "normal"
+    assert mem.last_objects == []
+    assert mem.last_plan == []
+    assert mem.last_command is None
+
+    mem.update_scene([{"name": "bottle"}, {"name": "cup"}])
+    assert mem.last_objects == [{"name": "bottle"}, {"name": "cup"}]
+
+    mem.update_plan(["pick bottle", "place on table"], "Pick up the bottle and place it on the table")
+    assert mem.last_plan == ["pick bottle", "place on table"]
+    assert mem.last_command == "Pick up the bottle and place it on the table"
+
+    mem.stop()
+    assert mem.safety_state == "stop"
+
+    mem.reset()
+    assert mem.holding is None
+    assert mem.safety_state == "normal"
+    assert mem.last_objects == []
+    assert mem.last_plan == []
+    assert mem.last_command is None
+
+
+
+🧠 brain.py
+
+from plan import Planner
+from memory import RobotMemory
+from llm import LLM
+
+
+class Brain:
+    def __init__(self):
+        self.memory = RobotMemory()
+        self.planner = Planner()
+        self.llm = LLM()
+
+    def process(self, cmd, vision):
+        if self.memory.safety_state == "stop":
+            return {"intent": "stop", "plan": [], "reply": "Stopped"}
+
+        objects = vision.get("objects", [])
+        self.memory.update_scene(objects)
+
+        decision = self.llm.decide(cmd, objects, self.memory.snapshot())
+
+        if not isinstance(decision, dict):
+            return {"intent": "chat", "plan": [], "reply": "I did not understand"}
+
+        intent = decision.get("intent")
+        if intent not in ("task", "chat", "stop"):
+            return {"intent": "chat", "plan": [], "reply": "I did not understand"}
+
+        if intent == "stop":
+            self.memory.stop()
+            return {"intent": "stop", "plan": [], "reply": "Stopping"}
+
+        if intent == "chat":
+            return {"intent": "chat", "plan": [], "reply": decision.get("reply", "")}
+
+        plan = []
+
+        for step in decision.get("steps", []):
+            action = step.get("action")
+
+            if action == "pick":
+                if self.memory.holding:
+                    return {"intent": "chat", "plan": [], "reply": "Already holding"}
+                obj = self.planner.find(step.get("target"), objects, mode=step.get("mode"))
+                if not obj:
+                    return {"intent": "chat", "plan": [], "reply": "Object not visible"}
+                plan.append(self.planner.pick(obj))
+                self.memory.holding = obj["name"]
+
+            elif action == "place":
+                if not self.memory.holding:
+                    return {"intent": "chat", "plan": [], "reply": "Nothing to place"}
+                relation = step.get("relation")
+                reference = step.get("reference")
+                if relation and reference:
+                    pos = self.planner.resolve_relation(relation, reference, objects)
+                    if not pos:
+                        return {"intent": "chat", "plan": [], "reply": "Reference object not visible"}
+                    x, z = pos
+                else:
+                    x, z = 0, 25
+                plan.append(self.planner.place(x, z))
+                self.memory.holding = None
+
+            elif action == "give":
+                if not self.memory.holding:
+                    return {"intent": "chat", "plan": [], "reply": "Nothing to give"}
+                plan.append(self.planner.give())
+                self.memory.holding = None
+
+        self.memory.update_plan(plan, cmd)
+        return {"intent": "task", "plan": plan, "reply": decision.get("reply", "")}
+
+
+🎯 plan.py
+
+class Planner:
+    def find(self, name, objects, mode=None):
+        candidates = [o for o in objects if o.get("name") == name]
+        if not candidates:
+            return None
+        if mode == "farthest":
+            return max(candidates, key=lambda o: o.get("z_cm", 0))
+        if mode == "nearest":
+            return min(candidates, key=lambda o: o.get("z_cm", 0))
+        return candidates[0]
+
+    def resolve_relation(self, relation, reference, objects):
+        ref = self.find(reference, objects)
+        if not ref:
+            return None
+        rx = ref.get("x_cm", 0)
+        rz = ref.get("z_cm", 25)
+        if relation == "left":
+            return rx - 10, rz
+        if relation == "right":
+            return rx + 10, rz
+        if relation == "front":
+            return rx, 25
+        return rx, rz
+
+    def pick(self, obj):
+        return {
+            "action": "pick",
+            "x": obj.get("x_cm", 0),
+            "z": obj.get("z_cm", 25)
+        }
+
+    def place(self, x, z):
+        return {
+            "action": "place",
+            "x": x,
+            "z": z
+        }
+
+    def give(self):
+        return {"action": "give"}
+
+
+֎ llm.py
+import json
+import requests
+import config
+
+
+class LLM:
+    def extract(self, text):
+        try:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            return json.loads(text[start:end])
+        except:
+            return None
+
+    def prompt(self, cmd, objects, memory):
+        return f"""Return ONLY valid JSON.
+
+FORMAT:
+{{
+  "intent": "task|chat|stop",
+  "steps": [
+    {{
+      "action": "pick|place|give",
+      "position": [x_cm, z_cm]|null
+    }}
+  ],
+  "reply": "short"
+}}
+
+World:
+X negative=left, positive=right
+Z front=25, larger=further
+
+Visible objects:
+{json.dumps(objects)}
+
+Memory:
+{json.dumps(memory)}
+
+Command:
+{cmd}
+"""
+
+    def decide(self, cmd, objects, memory):
+        r = requests.post(
+            config.OLLAMA_URL,
+            json={
+                "model": config.OLLAMA_MODEL,
+                "prompt": self.prompt(cmd, objects, memory),
+                "stream": False,
+                "options": {
+                    "temperature": config.TEMPERATURE,
+                    "num_predict": config.MAX_TOKENS
+                }
+            },
+            timeout=config.LLM_TIMEOUT
+        )
+        try:
+            raw = r.json().get("response", "")
+        except:
+            raw = r.text
+        return self.extract(raw)
+
+def test():
+    llm = LLM()
+    cmd = "Pick up the nearest bottle and pick up the cup."
+    objects = [
+        {"name": "bottle", "x_cm": -10, "z_cm": 30},
+        {"name": "cup", "x_cm": 10, "z_cm": 30}
+    ]
+    memory = []
+    decision = llm.decide(cmd, objects, memory)
+    print(json.dumps(decision, indent=2))
+
+
+
+
+
+
+🌐 server.py
+import requests
+import json
+from . import config
+
+
+def get_vision():
+    try:
+        r = requests.get(config.VISION_URL, timeout=1)
+        return r.json()
+    except requests.exceptions.RequestException:
+        return {"objects": []}
+    
+
+def send_to_russparry(plan):
+    print(json.dumps({"plan to send in : ": plan}, indent=2))
+
+    if not plan:
+        return
+    try:
+        requests.post(
+            config.RUSSPARRY_URL,
+            json={"plan": plan},
+            timeout=10
+        )
+    except requests.exceptions.ConnectTimeout:
+        print("❌ Russparry timeout: server unreachable")
+    except requests.exceptions.RequestException as e:
+        print("❌ Russparry error:", e)
+
+
+
+
+🚀 mainbrain.py
+
+
+import time
+import json
+
+from brain import Brain
+from brain.server import send_to_russparry, get_vision
+import brain
+
+def main():
+    brain = brain.Brain()
+
+    print("🧠 Brain online. Type commands (or 'quit').")
+
+    while True:
+        try:
+            user_text = input("\nUSER> ").strip()
+            if not user_text:
+                continue
+
+            if user_text.lower() in ("quit", "exit"):
+                print("Shutting down brain.")
+                break
+
+            # vision = get_vision()
+            vision = dict(zip(["objects"], [[
+                {"name": "bottle", "x_cm": -10, "z_cm": 30},
+                {"name": "cup", "x_cm": 10, "z_cm": 30}
+            ]]))
+            print(type(vision))
+            print("Vision data:", vision)
+
+            result = brain.process(user_text, vision)
+            print(json.dumps(result, indent=2))
+            if result.get("plan"):
+                send_to_russparry(result["plan"])
+
+        except KeyboardInterrupt:
+            print("\nInterrupted. Exiting.")
+            break
+
+        except Exception as e:
+            print("[BRAIN ERROR]:", e)
+            time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    main()

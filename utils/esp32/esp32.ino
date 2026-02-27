@@ -99,7 +99,7 @@ void loop() {
   handleGripperIR();
 
   if (Serial.available()) {
-    String cmd = Serial2.readStringUntil('\n');
+    String cmd = Serial.readStringUntil('\n');
     int id, deg;
 
     if (sscanf(cmd.c_str(), "J %d %d", &id, &deg) == 2) {

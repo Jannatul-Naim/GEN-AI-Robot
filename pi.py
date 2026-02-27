@@ -1,15 +1,20 @@
 import time
 import json
-import sys
+import os
 
 from brain.brain import Brain
-from brain.server import send_to_russparry, get_vision
+from brain.server import get_vision
 from brain.config import MOCK_VISION
 
+from utils import planner, serializer
+from utils.ik import IK
+
+from speech.stt import SpeechToText   # your STT class file
 
 
-
-
+# -----------------------------
+# Mock Vision
+# -----------------------------
 def mock_vision():
     return {
         "objects": [
@@ -19,43 +24,69 @@ def mock_vision():
     }
 
 
+# -----------------------------
+# Main Loop
+# -----------------------------
 def main():
     brain = Brain()
+    ik = IK()
 
-    print("🧠 Robot Brain Online")
-    print("Type a command. (quit to exit)\n")
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(BASE_DIR, "speech", "models", "vosk-model-small-en-us-0.15")
+    stt = SpeechToText(model_path)
 
-    while True:
-        try:
-            user_text = input("USER > ").strip()
+    print("🧠 Robot Brain Online (Speech Mode)")
+    print("Say 'quit' to exit.\n")
 
-            if not user_text:
-                continue
+    stt.start()
 
-            if user_text.lower() in ("quit", "exit"):
+    try:
+        for user_text in stt.listen():
+
+            print(f"\n🎤 USER > {user_text}")
+
+            if user_text.lower() in ("quit", "exit", "stop"):
                 print("🔌 Shutting down brain.")
                 break
 
-            # Get vision safely
+            # Get vision
             vision = mock_vision() if MOCK_VISION else get_vision()
 
+            # Process with LLM Brain
             result = brain.process(user_text, vision)
 
-            # Pretty output
             print("\n🧠 RESULT")
-            print(json.dumps(result, indent=2))
+            print(json.dumps(result, indent=3))
 
-            # Send plan to robot if exists
+            # Execute Task
             if result.get("intent") == "task" and result.get("plan"):
-                send_to_russparry(result["plan"])
 
-        except KeyboardInterrupt:
-            print("\n🔌 Interrupted. Exiting.")
-            break
+                grip, x, y, z = planner.plan(result["plan"])
 
-        except Exception as e:
-            print("❌ Brain error:", str(e))
-            time.sleep(0.5)
+                solutions = ik.solve(x, y, z)
+
+                if not solutions:
+                    print("❌ No IK solution found")
+                    continue
+
+                angles = list(solutions[0])
+
+                # Wrist angle
+                angles.append(90)
+
+                # Gripper
+                angles.append(90 if grip else 20)
+
+                for joint_id, angle in enumerate(angles):
+                    serializer.move_joint(joint_id, angle)
+                    print(f"🤖 Moving Joint {joint_id} → {angle}°")
+                    time.sleep(0.5)
+
+    except KeyboardInterrupt:
+        print("\n🔌 Interrupted.")
+
+    finally:
+        stt.stop()
 
 
 if __name__ == "__main__":
