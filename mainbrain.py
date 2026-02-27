@@ -2,7 +2,7 @@ import time
 import json
 
 from brain.brain import Brain
-from brain.server import send_to_russparry, get_vision
+from brain.server import get_vision
 
 def main():
     brain = Brain()
@@ -27,8 +27,6 @@ def main():
 
             result = brain.process(user_text, vision)
             print(json.dumps(result, indent=2))
-            if result.get("plan"):
-                send_to_russparry(result["plan"])
 
         except KeyboardInterrupt:
             print("\nInterrupted. Exiting.")

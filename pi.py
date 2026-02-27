@@ -6,15 +6,15 @@ from brain.brain import Brain
 from brain.server import get_vision
 from brain.config import MOCK_VISION
 
+from speech import tts
 from utils import planner, serializer
 from utils.ik import IK
 
-from speech.stt import SpeechToText   # your STT class file
+from speech.stt import SpeechToText
+from speech.tts import TextToSpeech
 
 
-# -----------------------------
-# Mock Vision
-# -----------------------------
+
 def mock_vision():
     return {
         "objects": [
@@ -23,10 +23,6 @@ def mock_vision():
         ]
     }
 
-
-# -----------------------------
-# Main Loop
-# -----------------------------
 def main():
     brain = Brain()
     ik = IK()
@@ -34,6 +30,7 @@ def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.join(BASE_DIR, "speech", "models", "vosk-model-small-en-us-0.15")
     stt = SpeechToText(model_path)
+    tts = TextToSpeech()
 
     print("🧠 Robot Brain Online (Speech Mode)")
     print("Say 'quit' to exit.\n")
@@ -44,6 +41,7 @@ def main():
         for user_text in stt.listen():
 
             print(f"\n🎤 USER > {user_text}")
+            user_text = input("USER > ").strip()
 
             if user_text.lower() in ("quit", "exit", "stop"):
                 print("🔌 Shutting down brain.")
@@ -55,8 +53,9 @@ def main():
             # Process with LLM Brain
             result = brain.process(user_text, vision)
 
-            print("\n🧠 RESULT")
-            print(json.dumps(result, indent=3))
+            # print("\n🧠 RESULT")
+            # print(json.dumps(result, indent=3))
+            tts.speak(result.get("reply"))
 
             # Execute Task
             if result.get("intent") == "task" and result.get("plan"):
