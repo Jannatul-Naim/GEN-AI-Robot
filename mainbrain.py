@@ -19,7 +19,6 @@ def main():
                 print("Shutting down brain.")
                 break
 
-            # vision = get_vision()
             vision = dict(zip(["objects"], [[
                 {"name": "bottle", "x_cm": -10, "z_cm": 30},
                 {"name": "cup", "x_cm": 10, "z_cm": 30}

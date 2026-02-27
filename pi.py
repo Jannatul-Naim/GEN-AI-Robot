@@ -47,17 +47,14 @@ def main():
                 print("🔌 Shutting down brain.")
                 break
 
-            # Get vision
             vision = mock_vision() if MOCK_VISION else get_vision()
 
-            # Process with LLM Brain
             result = brain.process(user_text, vision)
 
-            # print("\n🧠 RESULT")
             # print(json.dumps(result, indent=3))
+
             tts.speak(result.get("reply"))
 
-            # Execute Task
             if result.get("intent") == "task" and result.get("plan"):
 
                 grip, x, y, z = planner.plan(result["plan"])
@@ -70,10 +67,8 @@ def main():
 
                 angles = list(solutions[0])
 
-                # Wrist angle
                 angles.append(90)
 
-                # Gripper
                 angles.append(90 if grip else 20)
 
                 for joint_id, angle in enumerate(angles):
